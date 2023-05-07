@@ -1,0 +1,15 @@
+vox_nav_slam_node:
+  ros__parameters:
+    use_sim_time: True
+    x_bound: 50.0
+    y_bound: 50.0
+    z_bound: 5.0
+    downsample_voxel_size: 0.2
+    map_voxel_size: 0.2
+    max_icp_iter: 30
+    max_correspondence_distance: 1.0
+    method : 'VGICP_CUDA' # OTHER OPTIONS' GICP, VGICP, VGICP_CUDA, NDT_CUDA
+    num_threads: 8
+    max_num_targeted_clouds: 5
+    min_dist_to_update_map: 0.5
+    debug: True
