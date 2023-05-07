@@ -108,44 +108,50 @@ void FastGICPScanMatcher::cloudCallback(const sensor_msgs::msg::PointCloud2::Con
   // is this the first cloud?
   if (!is_first_cloud_received_)
   {
-    // First cloud, initialize map
-    RCLCPP_INFO(get_logger(), "Initializing map");
+    initializeMap(cloud_pcl, cloud->header);
     is_first_cloud_received_ = true;
-    pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_downsampled(new pcl::PointCloud<pcl::PointXYZI>());
-    pcl::VoxelGrid<pcl::PointXYZI> voxel_grid;
-    voxel_grid.setInputCloud(cloud_pcl);
-    voxel_grid.setLeafSize(icp_params_.map_voxel_size,  // NOLINT
-                           icp_params_.map_voxel_size,  // NOLINT
-                           icp_params_.map_voxel_size);
-    voxel_grid.filter(*cloud_downsampled);
-
-    // Convert current pose to Eigen
-    Eigen::Affine3d eig_affine = Eigen::Affine3d::Identity();
-    tf2::fromMsg(current_pose_->pose, eig_affine);
-
-    pcl::PointCloud<pcl::PointXYZI>::Ptr transformed_cloud_ptr(new pcl::PointCloud<pcl::PointXYZI>());
-    pcl::transformPointCloud(*cloud_downsampled, *transformed_cloud_ptr, eig_affine.matrix());
-    reg_->setInputTarget(transformed_cloud_ptr);
-
-    // map
-    sensor_msgs::msg::PointCloud2::SharedPtr map_msg_ptr(new sensor_msgs::msg::PointCloud2);
-    pcl::toROSMsg(*transformed_cloud_ptr, *map_msg_ptr);
-
-    // map array
-    sensor_msgs::msg::PointCloud2::SharedPtr cloud_msg_ptr(new sensor_msgs::msg::PointCloud2);
-    pcl::toROSMsg(*transformed_cloud_ptr, *cloud_msg_ptr);
-    vox_nav_slam_msgs::msg::SubMap submap;
-    submap.header = cloud->header;
-    submap.distance = 0;
-    submap.pose = current_pose_->pose;
-    submap.cloud = *cloud_msg_ptr;
-    sub_maps_->header = cloud->header;
-    sub_maps_->submaps.push_back(submap);
-
-    map_cloud_pub_->publish(submap.cloud);
   }
 
   performRegistration(cloud_pcl);
+}
+
+void FastGICPScanMatcher::initializeMap(const pcl::PointCloud<pcl::PointXYZI>::Ptr cloud,  // NOLINT
+                                        const std_msgs::msg::Header& header)
+{
+  // First cloud, initialize map
+  RCLCPP_INFO(get_logger(), "Initializing map");
+  pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_downsampled(new pcl::PointCloud<pcl::PointXYZI>());
+  pcl::VoxelGrid<pcl::PointXYZI> voxel_grid;
+  voxel_grid.setInputCloud(cloud);
+  voxel_grid.setLeafSize(icp_params_.map_voxel_size,  // NOLINT
+                         icp_params_.map_voxel_size,  // NOLINT
+                         icp_params_.map_voxel_size);
+  voxel_grid.filter(*cloud_downsampled);
+
+  // Convert current pose to Eigen
+  Eigen::Affine3d eig_affine = Eigen::Affine3d::Identity();
+  tf2::fromMsg(current_pose_->pose, eig_affine);
+
+  pcl::PointCloud<pcl::PointXYZI>::Ptr transformed_cloud_ptr(new pcl::PointCloud<pcl::PointXYZI>());
+  pcl::transformPointCloud(*cloud_downsampled, *transformed_cloud_ptr, eig_affine.matrix());
+  reg_->setInputTarget(transformed_cloud_ptr);
+
+  // map
+  sensor_msgs::msg::PointCloud2::SharedPtr map_msg_ptr(new sensor_msgs::msg::PointCloud2);
+  pcl::toROSMsg(*transformed_cloud_ptr, *map_msg_ptr);
+
+  // map array
+  sensor_msgs::msg::PointCloud2::SharedPtr cloud_msg_ptr(new sensor_msgs::msg::PointCloud2);
+  pcl::toROSMsg(*transformed_cloud_ptr, *cloud_msg_ptr);
+  vox_nav_slam_msgs::msg::SubMap submap;
+  submap.header = header;
+  submap.distance = 0;
+  submap.pose = current_pose_->pose;
+  submap.cloud = *cloud_msg_ptr;
+  sub_maps_->header = header;
+  sub_maps_->submaps.push_back(submap);
+
+  map_cloud_pub_->publish(submap.cloud);
 }
 
 void FastGICPScanMatcher::performRegistration(const pcl::PointCloud<pcl::PointXYZI>::Ptr cloud)

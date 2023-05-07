@@ -94,6 +94,9 @@ public:
 
   void odomCallback(const nav_msgs::msg::Odometry::ConstSharedPtr odom);
 
+  void initializeMap(const pcl::PointCloud<pcl::PointXYZI>::Ptr cloud,  // NOLINT
+                     const std_msgs::msg::Header& header);
+
   pcl::Registration<pcl::PointXYZI, pcl::PointXYZI>::Ptr createRegistration(std::string method, int num_threads,
                                                                             double voxel_resolution = 0.2);
 
