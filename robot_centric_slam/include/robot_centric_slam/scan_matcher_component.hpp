@@ -74,6 +74,7 @@ struct ICPParameters
   int num_threads = 4;
   int max_num_targeted_clouds = 20;
   float min_dist_to_update_map = 0.5;
+  bool publish_tf = true;
   bool debug = false;
 };
 
@@ -105,8 +106,6 @@ public:
   void insertScantoMap(const pcl::PointCloud<pcl::PointXYZI>::Ptr cloud,
                        const Eigen::Matrix4f& pose,  // NOLINT
                        const geometry_msgs::msg::PoseStamped& current_pose);
-
-  void publishMap();
 
 private:
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr cloud_subscriber_;
