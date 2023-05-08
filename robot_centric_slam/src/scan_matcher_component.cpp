@@ -71,6 +71,8 @@ FastGICPScanMatcher::FastGICPScanMatcher(const rclcpp::NodeOptions& options)  //
     RCLCPP_ERROR(get_logger(), "Failed to create registration");
     rclcpp::shutdown();
   }
+  reg_->setMaximumIterations(icp_params_.max_icp_iter);
+  reg_->setMaxCorrespondenceDistance(icp_params_.max_correspondence_distance);
 
   // Print parameters
   RCLCPP_INFO_STREAM(get_logger(), "x_bound " << icp_params_.x_bound);
@@ -231,7 +233,12 @@ void FastGICPScanMatcher::performRegistration(const pcl::PointCloud<pcl::PointXY
 
   // Align clouds
   pcl::PointCloud<pcl::PointXYZI>::Ptr output_cloud(new pcl::PointCloud<pcl::PointXYZI>);
+  // calculate time elapsed for ICP alignment
+
+  std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
   reg_->align(*output_cloud, sim_trans.cast<float>());
+  std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
+
   Eigen::Matrix4f final_transformation = reg_->getFinalTransformation();
 
   // Publish some visualizations to rviz
@@ -277,6 +284,20 @@ void FastGICPScanMatcher::performRegistration(const pcl::PointCloud<pcl::PointXY
     icp_future_ = std::make_shared<std::future<void>>(icp_task_.get_future());
     icp_thread_ = std::make_shared<std::thread>(std::move(std::ref(icp_task_)));
     mapping_flag_ = true;
+
+    if (icp_params_.debug)
+    {
+      // Print elapsed time for ICP alignment
+      int icp_alingment_elapsed = std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count();
+
+      RCLCPP_INFO(get_logger(), "ICP alignment took %d microseconds", icp_alingment_elapsed);
+      RCLCPP_INFO(get_logger(), "Map size: %d", targeted_cloud_->size());
+      // was alignment converged?
+      if (reg_->hasConverged())
+      {
+        RCLCPP_INFO(get_logger(), "ICP has converged, score is %+.0e", reg_->getFitnessScore());
+      }
+    }
   }
 }
 
@@ -338,7 +359,6 @@ void FastGICPScanMatcher::insertScantoMap(const pcl::PointCloud<pcl::PointXYZI>:
   pcl::toROSMsg(*targeted_cloud_, *map_msg_ptr);
   map_msg_ptr->header.frame_id = "odom";
   map_cloud_pub_->publish(*map_msg_ptr);
-  RCLCPP_INFO(this->get_logger(), "Map size: %d", targeted_cloud_->size());
 }
 
 pcl::Registration<pcl::PointXYZI, pcl::PointXYZI>::Ptr FastGICPScanMatcher::createRegistration(std::string method,
