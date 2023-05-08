@@ -75,17 +75,17 @@ FastGICPScanMatcher::FastGICPScanMatcher(const rclcpp::NodeOptions& options)  //
   reg_->setMaxCorrespondenceDistance(icp_params_.max_correspondence_distance);
 
   // Print parameters
-  RCLCPP_INFO_STREAM(get_logger(), "x_bound " << icp_params_.x_bound);
-  RCLCPP_INFO_STREAM(get_logger(), "y_bound " << icp_params_.y_bound);
-  RCLCPP_INFO_STREAM(get_logger(), "z_bound " << icp_params_.z_bound);
-  RCLCPP_INFO_STREAM(get_logger(), "downsample_voxel_size " << icp_params_.downsample_voxel_size);
-  RCLCPP_INFO_STREAM(get_logger(), "map_voxel_size " << icp_params_.map_voxel_size);
-  RCLCPP_INFO_STREAM(get_logger(), "max_icp_iter " << icp_params_.max_icp_iter);
-  RCLCPP_INFO_STREAM(get_logger(), "max_correspondence_distance " << icp_params_.max_correspondence_distance);
-  RCLCPP_INFO_STREAM(get_logger(), "method " << icp_params_.method);
-  RCLCPP_INFO_STREAM(get_logger(), "num_threads " << icp_params_.num_threads);
-  RCLCPP_INFO_STREAM(get_logger(), "max_num_targeted_clouds " << icp_params_.max_num_targeted_clouds);
-  RCLCPP_INFO_STREAM(get_logger(), "debug " << icp_params_.debug);
+  RCLCPP_INFO_STREAM(get_logger(), "x_bound: " << icp_params_.x_bound);
+  RCLCPP_INFO_STREAM(get_logger(), "y_bound: " << icp_params_.y_bound);
+  RCLCPP_INFO_STREAM(get_logger(), "z_bound: " << icp_params_.z_bound);
+  RCLCPP_INFO_STREAM(get_logger(), "downsample_voxel_size: " << icp_params_.downsample_voxel_size);
+  RCLCPP_INFO_STREAM(get_logger(), "map_voxel_size: " << icp_params_.map_voxel_size);
+  RCLCPP_INFO_STREAM(get_logger(), "max_icp_iter: " << icp_params_.max_icp_iter);
+  RCLCPP_INFO_STREAM(get_logger(), "max_correspondence_distance: " << icp_params_.max_correspondence_distance);
+  RCLCPP_INFO_STREAM(get_logger(), "method: " << icp_params_.method);
+  RCLCPP_INFO_STREAM(get_logger(), "num_threads: " << icp_params_.num_threads);
+  RCLCPP_INFO_STREAM(get_logger(), "max_num_targeted_clouds: " << icp_params_.max_num_targeted_clouds);
+  RCLCPP_INFO_STREAM(get_logger(), "debug: " << icp_params_.debug);
 
   RCLCPP_INFO(get_logger(), "Creating...");
 }
