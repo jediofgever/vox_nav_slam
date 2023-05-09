@@ -99,27 +99,36 @@ void FastGICPScanMatcher::odomCallback(const nav_msgs::msg::Odometry::ConstShare
 {
   std::lock_guard<std::mutex> lock(*mutex_);
   latest_odom_msg_ = std::make_shared<nav_msgs::msg::Odometry>(*odom);
+  is_odom_updated_ = true;
 }
 
 void FastGICPScanMatcher::cloudCallback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr cloud)
 {
   std::lock_guard<std::mutex> lock(*mutex_);
+  if (!is_odom_updated_)
+  {
+    RCLCPP_WARN(get_logger(), "Odometry is not updated yet");
+    return;
+  }
+
   pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_pcl(new pcl::PointCloud<pcl::PointXYZI>());
   pcl::fromROSMsg(*cloud, *cloud_pcl);
   // Crop cloud to ROI with crop box filter
   pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_cropped(new pcl::PointCloud<pcl::PointXYZI>());
-  pcl::CropBox<pcl::PointXYZI> crop_box_filter;
-  crop_box_filter.setInputCloud(cloud_pcl);
-  crop_box_filter.setMin(Eigen::Vector4f(-icp_params_.x_bound, -icp_params_.y_bound, -icp_params_.z_bound, 1.0));
-  crop_box_filter.setMax(Eigen::Vector4f(icp_params_.x_bound, icp_params_.y_bound, icp_params_.z_bound, 1.0));
-  crop_box_filter.filter(*cloud_pcl);
 
   // is this the first cloud?
   if (!is_first_cloud_received_)
   {
     initializeMap(cloud_pcl, cloud->header);
     is_first_cloud_received_ = true;
+    return;
   }
+
+  pcl::CropBox<pcl::PointXYZI> crop_box_filter;
+  crop_box_filter.setInputCloud(cloud_pcl);
+  crop_box_filter.setMin(Eigen::Vector4f(-icp_params_.x_bound, -icp_params_.y_bound, -icp_params_.z_bound, 1.0));
+  crop_box_filter.setMax(Eigen::Vector4f(icp_params_.x_bound, icp_params_.y_bound, icp_params_.z_bound, 1.0));
+  crop_box_filter.filter(*cloud_pcl);
 
   performRegistration(cloud_pcl);
 }
@@ -138,11 +147,20 @@ void FastGICPScanMatcher::initializeMap(const pcl::PointCloud<pcl::PointXYZI>::P
   voxel_grid.filter(*cloud_downsampled);
 
   // Convert current pose to Eigen
+  current_pose_->pose = latest_odom_msg_->pose.pose;
   Eigen::Affine3d eig_affine = Eigen::Affine3d::Identity();
   tf2::fromMsg(current_pose_->pose, eig_affine);
 
+  // crop box filter ROI around current pose
+  pcl::CropBox<pcl::PointXYZI> crop_box_filter;
+  crop_box_filter.setInputCloud(cloud_downsampled);
+  crop_box_filter.setMin(Eigen::Vector4f(-icp_params_.x_bound, -icp_params_.y_bound, -icp_params_.z_bound, 1.0));
+  crop_box_filter.setMax(Eigen::Vector4f(icp_params_.x_bound, icp_params_.y_bound, icp_params_.z_bound, 1.0));
+  crop_box_filter.filter(*cloud_downsampled);
+
   pcl::PointCloud<pcl::PointXYZI>::Ptr transformed_cloud_ptr(new pcl::PointCloud<pcl::PointXYZI>());
   pcl::transformPointCloud(*cloud_downsampled, *transformed_cloud_ptr, eig_affine.matrix());
+
   reg_->setInputTarget(transformed_cloud_ptr);
 
   // map
@@ -154,9 +172,11 @@ void FastGICPScanMatcher::initializeMap(const pcl::PointCloud<pcl::PointXYZI>::P
   pcl::toROSMsg(*transformed_cloud_ptr, *cloud_msg_ptr);
   vox_nav_slam_msgs::msg::SubMap submap;
   submap.header = header;
+  submap.header.frame_id = "map";
   submap.distance = 0;
-  submap.pose = current_pose_->pose;
+  submap.pose = geometry_msgs::msg::Pose();
   submap.cloud = *cloud_msg_ptr;
+  submap.cloud.header.frame_id = "map";
   sub_maps_->header = header;
   sub_maps_->submaps.push_back(submap);
 
@@ -177,12 +197,8 @@ void FastGICPScanMatcher::performRegistration(const pcl::PointCloud<pcl::PointXY
         // crop the map to the ROI with crop box filter around current pose
         pcl::CropBox<pcl::PointXYZI> crop_box_filter;
         crop_box_filter.setInputCloud(targeted_cloud_);
-        crop_box_filter.setMin(Eigen::Vector4f(current_pose_->pose.position.x - icp_params_.x_bound,
-                                               current_pose_->pose.position.y - icp_params_.y_bound,
-                                               current_pose_->pose.position.z - icp_params_.z_bound, 1.0));
-        crop_box_filter.setMax(Eigen::Vector4f(current_pose_->pose.position.x + icp_params_.x_bound,
-                                               current_pose_->pose.position.y + icp_params_.y_bound,
-                                               current_pose_->pose.position.z + icp_params_.z_bound, 1.0));
+        crop_box_filter.setMin(Eigen::Vector4f(-icp_params_.x_bound, -icp_params_.y_bound, -icp_params_.z_bound, 1.0));
+        crop_box_filter.setMax(Eigen::Vector4f(icp_params_.x_bound, icp_params_.y_bound, icp_params_.z_bound, 1.0));
         crop_box_filter.filter(*targeted_cloud_);
 
         // downsize targeted cloud
@@ -224,10 +240,12 @@ void FastGICPScanMatcher::performRegistration(const pcl::PointCloud<pcl::PointXY
   Eigen::Matrix4f sim_trans = Eigen::Matrix4f::Identity();
   tf2::fromMsg(current_pose_->pose, curr_pose_homogenous);
   tf2::fromMsg(latest_odom_msg_->pose.pose, latest_odom_homogenous);
+  sim_trans = curr_pose_homogenous.matrix().cast<float>();
+
   if (previous_odom_mat_ != Eigen::Matrix4f::Identity())
   {
     Eigen::Matrix4f odom_diff = previous_odom_mat_.inverse() * latest_odom_homogenous.matrix().cast<float>();
-    sim_trans = curr_pose_homogenous.matrix().cast<float>() * odom_diff;
+    sim_trans = sim_trans * odom_diff;
   }
   previous_odom_mat_ = latest_odom_homogenous.matrix().cast<float>();
 
@@ -247,21 +265,8 @@ void FastGICPScanMatcher::performRegistration(const pcl::PointCloud<pcl::PointXY
   Eigen::Quaternionf quat_eig(rot_mat);
   geometry_msgs::msg::Quaternion quat_msg = tf2::toMsg(quat_eig.cast<double>());
 
-  if (icp_params_.publish_tf)
-  {
-    geometry_msgs::msg::TransformStamped transform_stamped;
-    transform_stamped.header.stamp = now();
-    transform_stamped.header.frame_id = "odom";
-    transform_stamped.child_frame_id = "base_link";
-    transform_stamped.transform.translation.x = position.x();
-    transform_stamped.transform.translation.y = position.y();
-    transform_stamped.transform.translation.z = position.z();
-    transform_stamped.transform.rotation = quat_msg;
-    broadcaster_->sendTransform(transform_stamped);
-  }
-
   current_pose_->header.stamp = now();
-  current_pose_->header.frame_id = "odom";
+  current_pose_->header.frame_id = "map";
   current_pose_->pose.position.x = position.x();
   current_pose_->pose.position.y = position.y();
   current_pose_->pose.position.z = position.z();
@@ -269,7 +274,7 @@ void FastGICPScanMatcher::performRegistration(const pcl::PointCloud<pcl::PointXY
   pose_pub_->publish(*current_pose_);
   path_->poses.push_back(*current_pose_);
   path_->header.stamp = now();
-  path_->header.frame_id = "odom";
+  path_->header.frame_id = "map";
   path_pub_->publish(*path_);
 
   // Update map if translation is greater than threshold
@@ -297,6 +302,14 @@ void FastGICPScanMatcher::performRegistration(const pcl::PointCloud<pcl::PointXY
       {
         RCLCPP_INFO(get_logger(), "ICP has converged, score is %+.0e", reg_->getFitnessScore());
       }
+      std::cout << "Current Pose homogenenous:" << std::endl;
+      std::cout << curr_pose_homogenous.matrix() << std::endl;
+      // Print the initial guess
+      std::cout << "Initial guess:" << std::endl;
+      std::cout << sim_trans << std::endl;
+      // print result transformation
+      std::cout << "Transformation matrix:" << std::endl;
+      std::cout << final_transformation << std::endl;
     }
   }
 }
@@ -342,13 +355,13 @@ void FastGICPScanMatcher::insertScantoMap(const pcl::PointCloud<pcl::PointXYZI>:
   pcl::toROSMsg(*cloud_downsampled, *cloud_msg_ptr);
 
   vox_nav_slam_msgs::msg::SubMap submap;
-  submap.header.frame_id = "odom";
+  submap.header.frame_id = "map";
   submap.header.stamp = current_pose.header.stamp;
   accumulated_translation_ += translation_from_previous_;
   submap.distance = accumulated_translation_;
   submap.pose = current_pose.pose;
   submap.cloud = *cloud_msg_ptr;
-  submap.cloud.header.frame_id = "odom";
+  submap.cloud.header.frame_id = "map";
   sub_maps_->header.stamp = current_pose.header.stamp;
   sub_maps_->submaps.push_back(submap);
   sub_maps_pub_->publish(*sub_maps_);
@@ -357,7 +370,7 @@ void FastGICPScanMatcher::insertScantoMap(const pcl::PointCloud<pcl::PointXYZI>:
 
   sensor_msgs::msg::PointCloud2::SharedPtr map_msg_ptr(new sensor_msgs::msg::PointCloud2);
   pcl::toROSMsg(*targeted_cloud_, *map_msg_ptr);
-  map_msg_ptr->header.frame_id = "odom";
+  map_msg_ptr->header.frame_id = "map";
   map_cloud_pub_->publish(*map_msg_ptr);
 }
 

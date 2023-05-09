@@ -141,6 +141,7 @@ private:
   float translation_from_previous_{ 0.0 };
   float accumulated_translation_{ 0.0 };
   bool is_map_updated_{ false };
+  bool is_odom_updated_{ false };
   bool mapping_flag_{ false };
 };
 
