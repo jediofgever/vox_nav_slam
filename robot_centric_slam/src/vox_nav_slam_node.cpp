@@ -12,8 +12,8 @@ int main(int argc, char* argv[])
 
   auto scanmatcher = std::make_shared<vox_nav_slam::FastGICPScanMatcher>(options);
   exec.add_node(scanmatcher);
-  // auto graphbasedslam = std::make_shared<graphslam::GraphBasedSlamComponent>(options);
-  // exec.add_node(graphbasedslam);
+  auto graphbasedslam = std::make_shared<graphslam::GraphBasedSlamComponent>(options);
+  exec.add_node(graphbasedslam);
 
   exec.spin();
   rclcpp::shutdown();

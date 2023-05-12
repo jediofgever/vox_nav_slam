@@ -350,6 +350,17 @@ void FastGICPScanMatcher::insertScantoMap(const pcl::PointCloud<pcl::PointXYZI>:
     *targeted_cloud_ += *transformed_tmp_ptr;
   }
 
+  // remove subclouds that are more than max_num_targeted_clouds
+  if (num_submaps > icp_params_.max_num_targeted_clouds)
+  {
+    sub_maps_->submaps.erase(sub_maps_->submaps.begin(),
+                             sub_maps_->submaps.begin() + num_submaps - icp_params_.max_num_targeted_clouds);
+  }
+  if (icp_params_.debug)
+  {
+    RCLCPP_INFO(get_logger(), "There is %d Targeted clouds.", sub_maps_->submaps.size());
+  }
+
   /* map array */
   sensor_msgs::msg::PointCloud2::SharedPtr cloud_msg_ptr(new sensor_msgs::msg::PointCloud2);
   pcl::toROSMsg(*cloud_downsampled, *cloud_msg_ptr);

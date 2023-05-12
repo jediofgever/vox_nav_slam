@@ -1,45 +1,6 @@
-// Source: https://github.com/rsasaki0109/lidarslam_ros2
 
-#ifndef GS_GBS_COMPONENT_H_INCLUDED
-#define GS_GBS_COMPONENT_H_INCLUDED
-
-#if __cplusplus
-extern "C" {
-#endif
-
-// The below macros are taken from https://gcc.gnu.org/wiki/Visibility and from
-// demos/composition/include/composition/visibility_control.h at https://github.com/ros2/demos
-#if defined _WIN32 || defined __CYGWIN__
-#ifdef __GNUC__
-#define GS_GBS_EXPORT __attribute__((dllexport))
-#define GS_GBS_IMPORT __attribute__((dllimport))
-#else
-#define GS_GBS_EXPORT __declspec(dllexport)
-#define GS_GBS_IMPORT __declspec(dllimport)
-#endif
-#ifdef GS_GBS_BUILDING_DLL
-#define GS_GBS_PUBLIC GS_GBS_EXPORT
-#else
-#define GS_GBS_PUBLIC GS_GBS_IMPORT
-#endif
-#define GS_GBS_PUBLIC_TYPE GS_GBS_PUBLIC
-#define GS_GBS_LOCAL
-#else
-#define GS_GBS_EXPORT __attribute__((visibility("default")))
-#define GS_GBS_IMPORT
-#if __GNUC__ >= 4
-#define GS_GBS_PUBLIC __attribute__((visibility("default")))
-#define GS_GBS_LOCAL __attribute__((visibility("hidden")))
-#else
-#define GS_GBS_PUBLIC
-#define GS_GBS_LOCAL
-#endif
-#define GS_GBS_PUBLIC_TYPE
-#endif
-
-#if __cplusplus
-}  // extern "C"
-#endif
+#ifndef GS_GTSAM_COMPONENT_H_INCLUDED
+#define GS_GTSAM_COMPONENT_H_INCLUDED
 
 #include <pcl/PCLPointCloud2.h>
 #include <pcl/common/common.h>
@@ -77,16 +38,13 @@ extern "C" {
 #include <vox_nav_slam_msgs/msg/map_array.hpp>
 #include <vox_nav_slam_msgs/msg/sub_map.hpp>
 
-#include <g2o/core/sparse_optimizer.h>
-#include <g2o/core/optimization_algorithm_levenberg.h>
-#include <g2o/core/block_solver.h>
-#include <g2o/solvers/eigen/linear_solver_eigen.h>
-#include <g2o/types/slam3d/vertex_se3.h>
-#include <g2o/types/slam3d/vertex_pointxyz.h>
-#include <g2o/types/slam3d/edge_se3.h>
-#include <g2o/types/slam3d/edge_se3_pointxyz.h>
-#include <g2o/types/slam3d/se3quat.h>
-#include <g2o/types/slam3d/parameter_se3_offset.h>
+#include <gtsam_unstable/nonlinear/BatchFixedLagSmoother.h>
+#include <gtsam_unstable/nonlinear/IncrementalFixedLagSmoother.h>
+#include <gtsam/slam/BetweenFactor.h>
+#include <gtsam/nonlinear/NonlinearFactorGraph.h>
+#include <gtsam/nonlinear/Values.h>
+#include <gtsam/inference/Key.h>
+#include <gtsam/geometry/Pose3.h>
 
 #include <Eigen/Core>
 #include <queue>
@@ -95,7 +53,7 @@ extern "C" {
 #include <memory>
 #include <mutex>
 
-namespace graphslam
+namespace vox_nav_slam
 {
 
 struct ICPParameters
@@ -116,11 +74,11 @@ struct ICPParameters
   bool debug = false;
 };
 
-class GraphBasedSlamComponent : public rclcpp::Node
+class GTSAMComponent : public rclcpp::Node
 {
 public:
-  GS_GBS_PUBLIC
-  explicit GraphBasedSlamComponent(const rclcpp::NodeOptions& options);
+  GTSAMComponent(const rclcpp::NodeOptions& options);
+  ~GTSAMComponent();
 
   void mapArrayCallback(const vox_nav_slam_msgs::msg::MapArray::ConstSharedPtr msg);
   void doPoseAdjustment(vox_nav_slam_msgs::msg::MapArray map_array_msg);
@@ -158,6 +116,6 @@ private:
   };
   std::vector<LoopEdge> loop_edges_;
 };
-}  // namespace graphslam
+}  // namespace vox_nav_slam
 
-#endif  // GS_GBS_COMPONENT_H_INCLUDED
+#endif  // GS_GTSAM_COMPONENT_H_INCLUDED

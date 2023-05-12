@@ -43,9 +43,12 @@ g2o::solver_eigen
 find_package(OpenMP)
 find_package(fast_gicp REQUIRED)
 find_package(CUDA REQUIRED)
+find_package(GTSAM REQUIRED)
 
 option(BUILD_VGICP_CUDA "Build GPU-powered VGICP" ON)
 add_definitions(-BUILD_VGICP_CUDA)
+add_definitions(${PCL_DEFINITIONS})
+
 
 if (OPENMP_FOUND)
     set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
@@ -73,14 +76,15 @@ set(dependencies
 
 add_library(graph_based_slam_component SHARED src/graph_based_slam_component.cpp)
 ament_target_dependencies(graph_based_slam_component ${dependencies})
+target_compile_definitions(graph_based_slam_component PRIVATE "GS_GBS_BUILDING_DLL")
 
 add_library(scan_matcher_component SHARED src/scan_matcher_component.cpp)
 ament_target_dependencies(scan_matcher_component ${dependencies})
-
-target_compile_definitions(graph_based_slam_component PRIVATE "GS_GBS_BUILDING_DLL")
 target_compile_definitions(scan_matcher_component PRIVATE "GS_GBS_BUILDING_DLL")
 
-add_definitions(${PCL_DEFINITIONS})
+add_library(gtsam_component SHARED src/gtsam_component.cpp)
+ament_target_dependencies(gtsam_component ${dependencies})
+target_compile_definitions(gtsam_component PRIVATE "GS_GBS_BUILDING_DLL")
 
 add_executable(vox_nav_slam_node src/vox_nav_slam_node.cpp)
 ament_target_dependencies(vox_nav_slam_node ${dependencies})
@@ -92,8 +96,10 @@ include_directories(
 target_link_libraries(vox_nav_slam_node
                       graph_based_slam_component 
                       scan_matcher_component
+                      gtsam_component
                       ${PCL_LIBRARIES}
                       ${fast_gicp_LIBRARIES}
+                      gtsam
                       g2o::core
                       g2o::types_slam3d
                       g2o::solver_eigen)
@@ -104,9 +110,12 @@ rclcpp_components_register_nodes(graph_based_slam_component
   "graphslam::GraphBasedSlamComponent")
 rclcpp_components_register_nodes(scan_matcher_component 
   "vox_nav_slam::FastGICPScanMatcher")
+rclcpp_components_register_nodes(gtsam_component 
+  "vox_nav_slam::GTSAMComponent")
 
 ament_export_libraries(graph_based_slam_component)
 ament_export_libraries(scan_matcher_component)
+ament_export_libraries(gtsam_component)
 
 install(
   DIRECTORY "include/"
@@ -117,6 +126,7 @@ install(
 install(TARGETS
   graph_based_slam_component
   scan_matcher_component
+  gtsam_component
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin)
