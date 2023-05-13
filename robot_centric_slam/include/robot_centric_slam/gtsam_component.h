@@ -56,7 +56,7 @@
 namespace vox_nav_slam
 {
 
-struct ICPParameters
+struct GTSAMICPParameters
 {
   float x_bound = 40.0;
   float y_bound = 40.0;
@@ -81,7 +81,7 @@ public:
   ~GTSAMComponent();
 
   void mapArrayCallback(const vox_nav_slam_msgs::msg::MapArray::ConstSharedPtr msg);
-  void doPoseAdjustment(vox_nav_slam_msgs::msg::MapArray map_array_msg);
+  void doPoseAdjustment(vox_nav_slam_msgs::msg::MapArray& map_array_msg);
 
   pcl::Registration<pcl::PointXYZI, pcl::PointXYZI>::Ptr createRegistration(std::string method, int num_threads,
                                                                             double voxel_resolution = 0.2);
@@ -104,7 +104,7 @@ private:
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr modified_map_pub_;
 
   // ICP parameters
-  ICPParameters icp_params_;
+  GTSAMICPParameters icp_params_;
 
   bool initial_map_array_received_{ false };
   bool is_map_array_updated_{ false };

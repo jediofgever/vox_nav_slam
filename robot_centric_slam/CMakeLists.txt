@@ -100,6 +100,7 @@ target_link_libraries(vox_nav_slam_node
                       ${PCL_LIBRARIES}
                       ${fast_gicp_LIBRARIES}
                       gtsam
+                      gtsam_unstable
                       g2o::core
                       g2o::types_slam3d
                       g2o::solver_eigen)

@@ -10,8 +10,8 @@ vox_nav_slam_node:
     max_correspondence_distance: 1.0
     method : 'VGICP_CUDA' # OTHER OPTIONS' GICP, VGICP, VGICP_CUDA, NDT_CUDA
     num_threads: 8
-    max_num_targeted_clouds: 15
-    min_dist_to_update_map: 0.5
+    max_num_targeted_clouds: 100
+    min_dist_to_update_map: 0.1
     publish_tf: True
     num_adjacent_pose_constraints: 3
     debug: True

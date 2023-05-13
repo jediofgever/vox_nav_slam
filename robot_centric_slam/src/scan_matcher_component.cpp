@@ -119,8 +119,11 @@ void FastGICPScanMatcher::cloudCallback(const sensor_msgs::msg::PointCloud2::Con
   // is this the first cloud?
   if (!is_first_cloud_received_)
   {
-    initializeMap(cloud_pcl, cloud->header);
     is_first_cloud_received_ = true;
+    Eigen::Affine3d current_map_origin = Eigen::Affine3d::Identity();
+    tf2::fromMsg(latest_odom_msg_->pose.pose, current_map_origin);
+    current_map_origin_ = current_map_origin.matrix().cast<float>();
+    initializeMap(cloud_pcl, cloud->header);
     return;
   }
 
@@ -146,11 +149,7 @@ void FastGICPScanMatcher::initializeMap(const pcl::PointCloud<pcl::PointXYZI>::P
                          icp_params_.map_voxel_size);
   voxel_grid.filter(*cloud_downsampled);
 
-  // Convert current pose to Eigen
   current_pose_->pose = latest_odom_msg_->pose.pose;
-  Eigen::Affine3d eig_affine = Eigen::Affine3d::Identity();
-  tf2::fromMsg(current_pose_->pose, eig_affine);
-
   // crop box filter ROI around current pose
   pcl::CropBox<pcl::PointXYZI> crop_box_filter;
   crop_box_filter.setInputCloud(cloud_downsampled);
@@ -159,7 +158,7 @@ void FastGICPScanMatcher::initializeMap(const pcl::PointCloud<pcl::PointXYZI>::P
   crop_box_filter.filter(*cloud_downsampled);
 
   pcl::PointCloud<pcl::PointXYZI>::Ptr transformed_cloud_ptr(new pcl::PointCloud<pcl::PointXYZI>());
-  pcl::transformPointCloud(*cloud_downsampled, *transformed_cloud_ptr, eig_affine.matrix());
+  pcl::transformPointCloud(*cloud_downsampled, *transformed_cloud_ptr, current_map_origin_);
 
   reg_->setInputTarget(transformed_cloud_ptr);
 
@@ -171,13 +170,17 @@ void FastGICPScanMatcher::initializeMap(const pcl::PointCloud<pcl::PointXYZI>::P
   sensor_msgs::msg::PointCloud2::SharedPtr cloud_msg_ptr(new sensor_msgs::msg::PointCloud2);
   pcl::toROSMsg(*transformed_cloud_ptr, *cloud_msg_ptr);
   vox_nav_slam_msgs::msg::SubMap submap;
-  submap.header = header;
   submap.header.frame_id = "map";
+  submap.header.stamp = now();
   submap.distance = 0;
   submap.pose = geometry_msgs::msg::Pose();
   submap.cloud = *cloud_msg_ptr;
   submap.cloud.header.frame_id = "map";
-  sub_maps_->header = header;
+  submap.cloud.header.stamp = now();
+  submap.odometry = *latest_odom_msg_;
+  sub_maps_->header.frame_id = header.frame_id;
+  sub_maps_->header.stamp = now();
+  sub_maps_->origin = current_pose_->pose;
   sub_maps_->submaps.push_back(submap);
 
   map_cloud_pub_->publish(submap.cloud);
@@ -240,6 +243,7 @@ void FastGICPScanMatcher::performRegistration(const pcl::PointCloud<pcl::PointXY
   Eigen::Matrix4f sim_trans = Eigen::Matrix4f::Identity();
   tf2::fromMsg(current_pose_->pose, curr_pose_homogenous);
   tf2::fromMsg(latest_odom_msg_->pose.pose, latest_odom_homogenous);
+
   sim_trans = curr_pose_homogenous.matrix().cast<float>();
 
   if (previous_odom_mat_ != Eigen::Matrix4f::Identity())
@@ -367,14 +371,17 @@ void FastGICPScanMatcher::insertScantoMap(const pcl::PointCloud<pcl::PointXYZI>:
 
   vox_nav_slam_msgs::msg::SubMap submap;
   submap.header.frame_id = "map";
-  submap.header.stamp = current_pose.header.stamp;
+  submap.header.stamp = now();
   accumulated_translation_ += translation_from_previous_;
   submap.distance = accumulated_translation_;
   submap.pose = current_pose.pose;
   submap.cloud = *cloud_msg_ptr;
   submap.cloud.header.frame_id = "map";
-  sub_maps_->header.stamp = current_pose.header.stamp;
+  submap.cloud.header.stamp = now();
+  submap.odometry = *latest_odom_msg_;
+  sub_maps_->header.stamp = now();
   sub_maps_->submaps.push_back(submap);
+  sub_maps_->origin = sub_maps_->submaps[0].pose;
   sub_maps_pub_->publish(*sub_maps_);
 
   is_map_updated_ = true;
@@ -382,6 +389,7 @@ void FastGICPScanMatcher::insertScantoMap(const pcl::PointCloud<pcl::PointXYZI>:
   sensor_msgs::msg::PointCloud2::SharedPtr map_msg_ptr(new sensor_msgs::msg::PointCloud2);
   pcl::toROSMsg(*targeted_cloud_, *map_msg_ptr);
   map_msg_ptr->header.frame_id = "map";
+  map_msg_ptr->header.stamp = now();
   map_cloud_pub_->publish(*map_msg_ptr);
 }
 

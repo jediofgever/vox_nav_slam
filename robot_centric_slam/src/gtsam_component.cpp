@@ -85,6 +85,10 @@ GTSAMComponent::GTSAMComponent(const rclcpp::NodeOptions& options) : rclcpp::Nod
   RCLCPP_INFO(get_logger(), "Creating...");
 }
 
+GTSAMComponent::~GTSAMComponent()
+{
+}
+
 void GTSAMComponent::mapArrayCallback(const vox_nav_slam_msgs::msg::MapArray::ConstSharedPtr msg_ptr)
 {
   std::lock_guard<std::mutex> lock(mutex_);
@@ -95,8 +99,66 @@ void GTSAMComponent::mapArrayCallback(const vox_nav_slam_msgs::msg::MapArray::Co
   doPoseAdjustment(*map_array_msg_);
 }
 
-void GTSAMComponent::doPoseAdjustment(vox_nav_slam_msgs::msg::MapArray map_array_msg)
+void GTSAMComponent::doPoseAdjustment(vox_nav_slam_msgs::msg::MapArray& map_array_msg)
 {
+  RCLCPP_INFO(get_logger(), "Doing pose adjustment...");
+  double lag = 2.0;
+
+  // Create a fixed lag smoother
+  // The Batch version uses Levenberg-Marquardt to perform the nonlinear optimization
+  gtsam::BatchFixedLagSmoother smootherBatch(lag);
+  // The Incremental version uses iSAM2 to perform the nonlinear optimization
+  gtsam::ISAM2Params parameters;
+  parameters.relinearizeThreshold = 0.0;  // Set the relin threshold to zero such that the batch estimate is recovered
+  parameters.relinearizeSkip = 1;         // Relinearize every time
+  gtsam::IncrementalFixedLagSmoother smootherISAM2(lag, parameters);
+
+  // Create containers to store the factors and linearization points that
+  // will be sent to the smoothers
+  gtsam::NonlinearFactorGraph newFactors;
+  gtsam::Values newValues;
+  gtsam::FixedLagSmoother::KeyTimestampMap newTimestamps;
+
+  auto submap_size = map_array_msg.submaps.size();
+
+  // Create a pose prior factor for the first submap
+  gtsam::Pose3 first_pose = gtsam::Pose3(
+      gtsam::Rot3::Quaternion(map_array_msg.submaps[0].pose.orientation.w, map_array_msg.submaps[0].pose.orientation.x,
+                              map_array_msg.submaps[0].pose.orientation.y, map_array_msg.submaps[0].pose.orientation.z),
+      gtsam::Point3(map_array_msg.submaps[0].pose.position.x, map_array_msg.submaps[0].pose.position.y,
+                    map_array_msg.submaps[0].pose.position.z));
+  gtsam::noiseModel::Diagonal::shared_ptr priorNoise =
+      gtsam::noiseModel::Diagonal::Sigmas((gtsam::Vector(6) << 0.01, 0.01, 0.01, 0.01, 0.01, 0.01).finished());
+  newFactors.add(gtsam::PriorFactor<gtsam::Pose3>(0, first_pose, priorNoise));
+  newTimestamps.insert(std::make_pair(0, 0.0));
+
+  auto initial_time = map_array_msg.submaps[0].header.stamp.sec + map_array_msg.submaps[0].header.stamp.nanosec * 1e-9;
+
+  for (size_t i = 1; i < submap_size; i++)
+  {
+    auto prev_submap = map_array_msg.submaps[i - 1];
+    auto curr_submap = map_array_msg.submaps[i];
+
+    // Create a new pose prior factor
+    gtsam::Pose3 prev_pose = gtsam::Pose3(
+        gtsam::Rot3::Quaternion(prev_submap.pose.orientation.w, prev_submap.pose.orientation.x,
+                                prev_submap.pose.orientation.y, prev_submap.pose.orientation.z),
+        gtsam::Point3(prev_submap.pose.position.x, prev_submap.pose.position.y, prev_submap.pose.position.z));
+
+    gtsam::Pose3 curr_pose = gtsam::Pose3(
+        gtsam::Rot3::Quaternion(curr_submap.pose.orientation.w, curr_submap.pose.orientation.x,
+                                curr_submap.pose.orientation.y, curr_submap.pose.orientation.z),
+        gtsam::Point3(curr_submap.pose.position.x, curr_submap.pose.position.y, curr_submap.pose.position.z));
+
+    gtsam::noiseModel::Diagonal::shared_ptr priorNoise =
+        gtsam::noiseModel::Diagonal::Sigmas((gtsam::Vector(6) << 0.01, 0.01, 0.01, 0.01, 0.01, 0.01).finished());
+        
+    newFactors.add(gtsam::BetweenFactor<gtsam::Pose3>(i - 1, i, prev_pose.between(curr_pose), priorNoise));
+
+    // Time stamp for the new factor
+    auto curr_time = curr_submap.header.stamp.sec + curr_submap.header.stamp.nanosec * 1e-9;
+    newTimestamps.insert(std::make_pair(i, curr_time - initial_time));
+  }
 }
 
 pcl::Registration<pcl::PointXYZI, pcl::PointXYZI>::Ptr GTSAMComponent::createRegistration(std::string method,  // NOLINT

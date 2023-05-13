@@ -48,6 +48,14 @@
 #include <fast_gicp/ndt/ndt_cuda.hpp>
 #include <fast_gicp/gicp/fast_vgicp_cuda.hpp>
 
+#include <gtsam_unstable/nonlinear/BatchFixedLagSmoother.h>
+#include <gtsam_unstable/nonlinear/IncrementalFixedLagSmoother.h>
+#include <gtsam/slam/BetweenFactor.h>
+#include <gtsam/nonlinear/NonlinearFactorGraph.h>
+#include <gtsam/nonlinear/Values.h>
+#include <gtsam/inference/Key.h>
+#include <gtsam/geometry/Pose3.h>
+
 #include <vox_nav_slam_msgs/msg/map_array.hpp>
 #include <vox_nav_slam_msgs/msg/sub_map.hpp>
 
@@ -137,6 +145,8 @@ private:
   std::packaged_task<void()> icp_task_;
   std::shared_ptr<std::future<void>> icp_future_;
   Eigen::Matrix4f previous_odom_mat_{ Eigen::Matrix4f::Identity() };
+  Eigen::Matrix4f current_map_origin_{ Eigen::Matrix4f::Identity() };
+  Eigen::Matrix4f previous_icp_mat_{ Eigen::Matrix4f::Identity() };
   Eigen::Vector3f previous_position_{ Eigen::Vector3f::Zero() };
   float translation_from_previous_{ 0.0 };
   float accumulated_translation_{ 0.0 };
