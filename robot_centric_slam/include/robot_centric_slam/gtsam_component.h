@@ -98,6 +98,7 @@ private:
   std::shared_ptr<pcl::VoxelGrid<pcl::PointXYZI>> voxelgrid_;
 
   vox_nav_slam_msgs::msg::MapArray::SharedPtr map_array_msg_;
+  nav_msgs::msg::Path::SharedPtr path_msg_;
   rclcpp::Subscription<vox_nav_slam_msgs::msg::MapArray>::SharedPtr map_array_sub_;
   rclcpp::Publisher<vox_nav_slam_msgs::msg::MapArray>::SharedPtr modified_map_array_pub_;
   rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr modified_path_pub_;

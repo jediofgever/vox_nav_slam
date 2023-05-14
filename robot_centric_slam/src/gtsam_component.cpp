@@ -12,6 +12,7 @@ GTSAMComponent::GTSAMComponent(const rclcpp::NodeOptions& options) : rclcpp::Nod
   broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
 
   map_array_msg_ = std::make_shared<vox_nav_slam_msgs::msg::MapArray>();
+  path_msg_ = std::make_shared<nav_msgs::msg::Path>();
 
   // Define parameters
   declare_parameter("x_bound", icp_params_.x_bound);
@@ -101,6 +102,14 @@ void GTSAMComponent::mapArrayCallback(const vox_nav_slam_msgs::msg::MapArray::Co
 
 void GTSAMComponent::doPoseAdjustment(vox_nav_slam_msgs::msg::MapArray& map_array_msg)
 {
+  auto submap_size = map_array_msg.submaps.size();
+
+  if (submap_size < 3)
+  {
+    RCLCPP_WARN(get_logger(), "Not enough submaps to perform pose adjustment");
+    return;
+  }
+
   RCLCPP_INFO(get_logger(), "Doing pose adjustment...");
   double lag = 2.0;
 
@@ -119,8 +128,6 @@ void GTSAMComponent::doPoseAdjustment(vox_nav_slam_msgs::msg::MapArray& map_arra
   gtsam::Values newValues;
   gtsam::FixedLagSmoother::KeyTimestampMap newTimestamps;
 
-  auto submap_size = map_array_msg.submaps.size();
-
   // Create a pose prior factor for the first submap
   gtsam::Pose3 first_pose = gtsam::Pose3(
       gtsam::Rot3::Quaternion(map_array_msg.submaps[0].pose.orientation.w, map_array_msg.submaps[0].pose.orientation.x,
@@ -129,7 +136,9 @@ void GTSAMComponent::doPoseAdjustment(vox_nav_slam_msgs::msg::MapArray& map_arra
                     map_array_msg.submaps[0].pose.position.z));
   gtsam::noiseModel::Diagonal::shared_ptr priorNoise =
       gtsam::noiseModel::Diagonal::Sigmas((gtsam::Vector(6) << 0.01, 0.01, 0.01, 0.01, 0.01, 0.01).finished());
+
   newFactors.add(gtsam::PriorFactor<gtsam::Pose3>(0, first_pose, priorNoise));
+  newValues.insert(0, first_pose);
   newTimestamps.insert(std::make_pair(0, 0.0));
 
   auto initial_time = map_array_msg.submaps[0].header.stamp.sec + map_array_msg.submaps[0].header.stamp.nanosec * 1e-9;
@@ -139,26 +148,86 @@ void GTSAMComponent::doPoseAdjustment(vox_nav_slam_msgs::msg::MapArray& map_arra
     auto prev_submap = map_array_msg.submaps[i - 1];
     auto curr_submap = map_array_msg.submaps[i];
 
-    // Create a new pose prior factor
-    gtsam::Pose3 prev_pose = gtsam::Pose3(
-        gtsam::Rot3::Quaternion(prev_submap.pose.orientation.w, prev_submap.pose.orientation.x,
-                                prev_submap.pose.orientation.y, prev_submap.pose.orientation.z),
-        gtsam::Point3(prev_submap.pose.position.x, prev_submap.pose.position.y, prev_submap.pose.position.z));
-
+    // Guess current pose
     gtsam::Pose3 curr_pose = gtsam::Pose3(
         gtsam::Rot3::Quaternion(curr_submap.pose.orientation.w, curr_submap.pose.orientation.x,
                                 curr_submap.pose.orientation.y, curr_submap.pose.orientation.z),
         gtsam::Point3(curr_submap.pose.position.x, curr_submap.pose.position.y, curr_submap.pose.position.z));
+    newValues.insert(i, curr_pose);
+
+    // ICP measurements
+    gtsam::Pose3 prev_icp_pose = gtsam::Pose3(
+        gtsam::Rot3::Quaternion(prev_submap.pose.orientation.w, prev_submap.pose.orientation.x,
+                                prev_submap.pose.orientation.y, prev_submap.pose.orientation.z),
+        gtsam::Point3(prev_submap.pose.position.x, prev_submap.pose.position.y, prev_submap.pose.position.z));
+    gtsam::Pose3 curr_icp_pose = gtsam::Pose3(
+        gtsam::Rot3::Quaternion(curr_submap.pose.orientation.w, curr_submap.pose.orientation.x,
+                                curr_submap.pose.orientation.y, curr_submap.pose.orientation.z),
+        gtsam::Point3(curr_submap.pose.position.x, curr_submap.pose.position.y, curr_submap.pose.position.z));
+    // Odometry measurements
+    gtsam::Pose3 prev_odom_pose =
+        gtsam::Pose3(gtsam::Rot3::Quaternion(
+                         prev_submap.odometry.pose.pose.orientation.w, prev_submap.odometry.pose.pose.orientation.x,
+                         prev_submap.odometry.pose.pose.orientation.y, prev_submap.odometry.pose.pose.orientation.z),
+                     gtsam::Point3(prev_submap.odometry.pose.pose.position.x, prev_submap.odometry.pose.pose.position.y,
+                                   prev_submap.odometry.pose.pose.position.z));
+    gtsam::Pose3 curr_odom_pose =
+        gtsam::Pose3(gtsam::Rot3::Quaternion(
+                         curr_submap.odometry.pose.pose.orientation.w, curr_submap.odometry.pose.pose.orientation.x,
+                         curr_submap.odometry.pose.pose.orientation.y, curr_submap.odometry.pose.pose.orientation.z),
+                     gtsam::Point3(curr_submap.odometry.pose.pose.position.x, curr_submap.odometry.pose.pose.position.y,
+                                   curr_submap.odometry.pose.pose.position.z));
 
     gtsam::noiseModel::Diagonal::shared_ptr priorNoise =
         gtsam::noiseModel::Diagonal::Sigmas((gtsam::Vector(6) << 0.01, 0.01, 0.01, 0.01, 0.01, 0.01).finished());
-        
-    newFactors.add(gtsam::BetweenFactor<gtsam::Pose3>(i - 1, i, prev_pose.between(curr_pose), priorNoise));
+
+    newFactors.add(gtsam::BetweenFactor<gtsam::Pose3>(i - 1, i, prev_icp_pose.between(curr_icp_pose), priorNoise));
+    newFactors.add(gtsam::BetweenFactor<gtsam::Pose3>(i - 1, i, prev_odom_pose.between(curr_odom_pose), priorNoise));
 
     // Time stamp for the new factor
     auto curr_time = curr_submap.header.stamp.sec + curr_submap.header.stamp.nanosec * 1e-9;
     newTimestamps.insert(std::make_pair(i, curr_time - initial_time));
+
+    smootherBatch.update(newFactors, newValues, newTimestamps);
+    smootherISAM2.update(newFactors, newValues, newTimestamps);
+    for (size_t i = 1; i < 2; ++i)
+    {  // Optionally perform multiple iSAM2 iterations
+      smootherISAM2.update();
+    }
+
+    // Print the optimized current pose
+    std::cout << std::setprecision(5) << "Timestamp = " << curr_time - initial_time << std::endl;
+    smootherBatch.calculateEstimate<gtsam::Pose3>(i).print("Batch Estimate:");
+    smootherISAM2.calculateEstimate<gtsam::Pose3>(i).print("iSAM2 Estimate:");
+    std::cout << std::endl;
+
+    // Clear contains for the next iteration
+    newTimestamps.clear();
+    newValues.clear();
+    newFactors.resize(0);
   }
+
+  // Transform back the optimized poses wtih respect to the first submap
+  // isam estimate
+  gtsam::Pose3 isam_pose = smootherISAM2.calculateEstimate<gtsam::Pose3>(submap_size - 1);
+
+  first_pose = isam_pose * first_pose;
+
+  // Publish a nav_msgs::Odometry message
+  path_msg_->header.frame_id = "map";
+  path_msg_->header.stamp = now();
+  geometry_msgs::msg::PoseStamped pose_stamped;
+  pose_stamped.header.frame_id = "map";
+  pose_stamped.header.stamp = now();
+  pose_stamped.pose.position.x = first_pose.translation().x();
+  pose_stamped.pose.position.y = first_pose.translation().y();
+  pose_stamped.pose.position.z = first_pose.translation().z();
+  pose_stamped.pose.orientation.x = first_pose.rotation().toQuaternion().x();
+  pose_stamped.pose.orientation.y = first_pose.rotation().toQuaternion().y();
+  pose_stamped.pose.orientation.z = first_pose.rotation().toQuaternion().z();
+  pose_stamped.pose.orientation.w = first_pose.rotation().toQuaternion().w();
+  path_msg_->poses.push_back(pose_stamped);
+  modified_path_pub_->publish(*path_msg_);
 }
 
 pcl::Registration<pcl::PointXYZI, pcl::PointXYZI>::Ptr GTSAMComponent::createRegistration(std::string method,  // NOLINT
