@@ -11,7 +11,6 @@ GraphBasedSlamComponent::GraphBasedSlamComponent(const rclcpp::NodeOptions& opti
   tf_buffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
   tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
   broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
-
   map_array_msg_ = std::make_shared<vox_nav_slam_msgs::msg::MapArray>();
 
   // Define parameters
@@ -56,7 +55,8 @@ GraphBasedSlamComponent::GraphBasedSlamComponent(const rclcpp::NodeOptions& opti
   registration_->setMaxCorrespondenceDistance(icp_params_.max_correspondence_distance);
 
   voxelgrid_ = std::make_shared<pcl::VoxelGrid<pcl::PointXYZI>>();
-  voxelgrid_->setLeafSize(icp_params_.downsample_voxel_size, icp_params_.downsample_voxel_size,
+  voxelgrid_->setLeafSize(icp_params_.downsample_voxel_size,  // NOLINT
+                          icp_params_.downsample_voxel_size,  // NOLINT
                           icp_params_.downsample_voxel_size);
 
   map_array_sub_ = create_subscription<vox_nav_slam_msgs::msg::MapArray>(
@@ -68,6 +68,12 @@ GraphBasedSlamComponent::GraphBasedSlamComponent(const rclcpp::NodeOptions& opti
       "modified_map_array", rclcpp::QoS(rclcpp::KeepLast(1)).reliable());
   modified_path_pub_ = create_publisher<nav_msgs::msg::Path>(  // NOLINT
       "modified_path", rclcpp::QoS(rclcpp::KeepLast(1)).reliable());
+  icp_pose_array_pub_ = create_publisher<geometry_msgs::msg::PoseArray>(  // NOLINT
+      "icp_pose_array", rclcpp::QoS(rclcpp::KeepLast(1)).reliable());
+  odom_pose_array_pub_ = create_publisher<geometry_msgs::msg::PoseArray>(  // NOLINT
+      "odom_pose_array", rclcpp::QoS(rclcpp::KeepLast(1)).reliable());
+  icp_uncertainty_marker_pub_ = create_publisher<visualization_msgs::msg::MarkerArray>(  // NOLINT
+      "icp_uncertainty_marker", rclcpp::QoS(rclcpp::KeepLast(1)).reliable());
 
   // Print parameters
   RCLCPP_INFO_STREAM(get_logger(), "x_bound: " << icp_params_.x_bound);
@@ -83,6 +89,8 @@ GraphBasedSlamComponent::GraphBasedSlamComponent(const rclcpp::NodeOptions& opti
   RCLCPP_INFO_STREAM(get_logger(), "num_adjacent_pose_constraints: " << icp_params_.num_adjacent_pose_constraints);
   RCLCPP_INFO_STREAM(get_logger(), "debug: " << icp_params_.debug);
 
+  icp_thread_ = std::make_shared<std::thread>(std::bind(&GraphBasedSlamComponent::icpThread, this));
+
   RCLCPP_INFO(get_logger(), "Creating...");
 }
 
@@ -96,113 +104,163 @@ void GraphBasedSlamComponent::mapArrayCallback(const vox_nav_slam_msgs::msg::Map
   doPoseAdjustment(*map_array_msg_);
 }
 
+void GraphBasedSlamComponent::icpThread()
+{
+  // Optimize submaps in the loop until the node is shutdown
+  while (rclcpp::ok())
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    if (map_array_msg_->submaps.size() < 5)
+    {
+      continue;
+    }
+    std::vector<Eigen::Matrix4f> transforms;
+
+    visualization_msgs::msg::MarkerArray marker_array;
+    visualization_msgs::msg::Marker marker;
+
+    // Optimize submaps
+    for (int i = 4; i < map_array_msg_->submaps.size(); i++)
+    {
+      Eigen::Affine3d curr_ith_cloud_transform;
+      tf2::fromMsg(map_array_msg_->submaps[i].odometry.pose.pose, curr_ith_cloud_transform);
+      pcl::PointCloud<pcl::PointXYZI>::Ptr curr_ith_cloud(new pcl::PointCloud<pcl::PointXYZI>);
+      pcl::fromROSMsg(map_array_msg_->submaps[i].cloud, *curr_ith_cloud);
+      pcl::transformPointCloud(*curr_ith_cloud, *curr_ith_cloud, curr_ith_cloud_transform.matrix().cast<float>());
+
+      Eigen::Vector3d odom_position = curr_ith_cloud_transform.matrix().block<3, 1>(0, 3);
+      Eigen::Matrix3d odom_rot_mat = curr_ith_cloud_transform.matrix().block<3, 3>(0, 0);
+      Eigen::Vector3d odom_rpy = odom_rot_mat.cast<double>().eulerAngles(2, 1, 0);  //
+      Eigen::VectorXd odom_vec_joined(odom_position.size() + odom_rpy.size());
+      odom_vec_joined << odom_position, odom_rpy;
+
+      std::vector<Eigen::VectorXd> icp_measurements;
+
+      for (int j = i - 4; j < i; j++)
+      {
+        // Get transform between two submaps
+        Eigen::Affine3d prev_jth_transform;
+        tf2::fromMsg(map_array_msg_->submaps[j].odometry.pose.pose, prev_jth_transform);
+
+        Eigen::Matrix4f diff =
+            prev_jth_transform.inverse().matrix().cast<float>() * curr_ith_cloud_transform.matrix().cast<float>();
+
+        // Transform submap pointcloud
+        pcl::PointCloud<pcl::PointXYZI>::Ptr prev_jth_cloud(new pcl::PointCloud<pcl::PointXYZI>);
+        pcl::fromROSMsg(map_array_msg_->submaps[j].cloud, *prev_jth_cloud);
+        pcl::transformPointCloud(*prev_jth_cloud, *prev_jth_cloud, prev_jth_transform.matrix().cast<float>());
+
+        // Set target pointcloud
+        registration_->setInputTarget(prev_jth_cloud);
+
+        // Set source pointcloud
+        registration_->setInputSource(curr_ith_cloud);
+        pcl::PointCloud<pcl::PointXYZI>::Ptr output_cloud(new pcl::PointCloud<pcl::PointXYZI>);
+
+        registration_->align(*output_cloud, curr_ith_cloud_transform.matrix().cast<float>() * diff);
+        Eigen::Matrix4f final_transformation = registration_->getFinalTransformation();
+
+        Eigen::Vector3d icp_position = final_transformation.block<3, 1>(0, 3).cast<double>();
+        Eigen::Matrix3d icp_rot_mat = final_transformation.block<3, 3>(0, 0).cast<double>();
+        Eigen::Vector3d icp_rpy = icp_rot_mat.eulerAngles(2, 1, 0);
+
+        Eigen::VectorXd icp_vec_joined(icp_position.size() + icp_rpy.size());
+        icp_vec_joined << icp_position, icp_rpy;
+
+        icp_measurements.push_back(icp_vec_joined);
+      }
+
+      Eigen::VectorXd mean = Eigen::VectorXd::Zero(icp_measurements[0].size());
+      for (int m = 0; m < icp_measurements.size(); m++)
+      {
+        mean += icp_measurements[m];
+      }
+      mean /= icp_measurements.size();
+
+      Eigen::MatrixXd covariance = Eigen::MatrixXd::Zero(icp_measurements[0].size(), icp_measurements[0].size());
+      for (int m = 0; m < icp_measurements.size(); m++)
+      {
+        covariance += (icp_measurements[m] - mean) * (icp_measurements[m] - mean).transpose();
+      }
+      covariance /= icp_measurements.size();
+
+      // Convert fused measurement to Eigen::Matrix4f and add to transforms
+      Eigen::Matrix4f transform = Eigen::Matrix4f::Identity();
+      transform.block<3, 1>(0, 3) = mean.block<3, 1>(0, 0).cast<float>();
+      Eigen::Matrix3f rot_mat = Eigen::AngleAxisf(mean(5), Eigen::Vector3f::UnitZ()) *
+                                Eigen::AngleAxisf(mean(4), Eigen::Vector3f::UnitY()) *
+                                Eigen::AngleAxisf(mean(3), Eigen::Vector3f::UnitX()).matrix();
+      transform.block<3, 3>(0, 0) = rot_mat;
+
+      transforms.push_back(transform);
+
+      // Publish uncertainty marker
+      marker.header = map_array_msg_->header;
+      marker.ns = "icp_uncertainty";
+      marker.id = i;
+      marker.type = visualization_msgs::msg::Marker::SPHERE;
+      marker.action = visualization_msgs::msg::Marker::ADD;
+      marker.pose.position.x = mean(0);
+      marker.pose.position.y = mean(1);
+      marker.pose.position.z = mean(2);
+      marker.pose.orientation.w = 1.0;
+      marker.scale.x = std::max(10.0 * covariance(0, 0), 0.05);
+      marker.scale.y = std::max(10.0 * covariance(1, 1), 0.05);
+      marker.scale.z = std::max(10.0 * covariance(2, 2), 0.05);
+      marker.color.a = 0.25;
+      marker.color.r = 1.0;
+      marker.color.g = 0.0;
+      marker.color.b = 0.0;
+      marker_array.markers.push_back(marker);
+
+      // print covariance
+      std::cout << "covariance: " << std::endl;
+      std::cout << covariance << std::endl;
+    }
+
+    // Publish modified path which is residing in the transforms
+    nav_msgs::msg::Path modified_path;
+    modified_path.header = map_array_msg_->header;
+    for (auto&& i : transforms)
+    {
+      geometry_msgs::msg::PoseStamped pose_stamped;
+      pose_stamped.header = map_array_msg_->header;
+      Eigen::Vector3f position = i.block<3, 1>(0, 3).cast<float>();
+      Eigen::Matrix3f rot_mat = i.block<3, 3>(0, 0).cast<float>();
+      Eigen::Quaternionf quat_eig(rot_mat);
+      geometry_msgs::msg::Quaternion quat_msg = tf2::toMsg(quat_eig.cast<double>());
+      pose_stamped.pose.position.x = position.x();
+      pose_stamped.pose.position.y = position.y();
+      pose_stamped.pose.position.z = position.z();
+      pose_stamped.pose.orientation = quat_msg;
+      modified_path.poses.push_back(pose_stamped);
+    }
+
+    modified_path_pub_->publish(modified_path);
+    icp_uncertainty_marker_pub_->publish(marker_array);
+  }
+}
+
 void GraphBasedSlamComponent::doPoseAdjustment(vox_nav_slam_msgs::msg::MapArray map_array_msg)
 {
-  g2o::SparseOptimizer optimizer;
-  optimizer.setVerbose(false);
-  std::unique_ptr<g2o::BlockSolver_6_3::LinearSolverType> linear_solver =
-      g2o::make_unique<g2o::LinearSolverEigen<g2o::BlockSolver_6_3::PoseMatrixType>>();
-  g2o::OptimizationAlgorithmLevenberg* solver =
-      new g2o::OptimizationAlgorithmLevenberg(g2o::make_unique<g2o::BlockSolver_6_3>(std::move(linear_solver)));
+  // Publish odom and icp pose array for visualization
+  geometry_msgs::msg::PoseArray odom_pose_array_msg;
+  geometry_msgs::msg::PoseArray icp_pose_array_msg;
 
-  optimizer.setAlgorithm(solver);
-
-  int submaps_size = map_array_msg.submaps.size();
-  Eigen::Matrix<double, 6, 6> info_mat = Eigen::Matrix<double, 6, 6>::Identity();
-  for (int i = 0; i < submaps_size; i++)
+  for (auto&& i : map_array_msg.submaps)
   {
-    Eigen::Affine3d affine;
-    Eigen::fromMsg(map_array_msg.submaps[i].pose, affine);
-    Eigen::Isometry3d pose(affine.matrix());
+    nav_msgs::msg::Odometry odom = i.odometry;
+    geometry_msgs::msg::Pose icp_pose = i.pose;
 
-    g2o::VertexSE3* vertex_se3 = new g2o::VertexSE3();
-    vertex_se3->setId(i);
-    vertex_se3->setEstimate(pose);
-    if (i == 0)
-    {
-      vertex_se3->setFixed(true);
-    }
-    optimizer.addVertex(vertex_se3);
-
-    if (i > icp_params_.num_adjacent_pose_constraints)
-    {
-      for (int j = 0; j < icp_params_.num_adjacent_pose_constraints; j++)
-      {
-        Eigen::Affine3d pre_affine;
-        Eigen::fromMsg(map_array_msg.submaps[i - icp_params_.num_adjacent_pose_constraints + j].pose, pre_affine);
-        Eigen::Isometry3d pre_pose(pre_affine.matrix());
-        Eigen::Isometry3d relative_pose = pre_pose.inverse() * pose;
-        g2o::EdgeSE3* edge_se3 = new g2o::EdgeSE3();
-        edge_se3->setMeasurement(relative_pose);
-        edge_se3->setInformation(info_mat);
-        edge_se3->vertices()[0] = optimizer.vertex(i - icp_params_.num_adjacent_pose_constraints + j);
-        edge_se3->vertices()[1] = optimizer.vertex(i);
-        optimizer.addEdge(edge_se3);
-      }
-    }
+    odom_pose_array_msg.poses.push_back(odom.pose.pose);
+    icp_pose_array_msg.poses.push_back(icp_pose);
   }
-  /* loop edge */
-  /*for (auto loop_edge : loop_edges_)
-  {
-    g2o::EdgeSE3* edge_se3 = new g2o::EdgeSE3();
-    edge_se3->setMeasurement(loop_edge.relative_pose);
-    edge_se3->setInformation(info_mat);
-    edge_se3->vertices()[0] = optimizer.vertex(loop_edge.pair_id.first);
-    edge_se3->vertices()[1] = optimizer.vertex(loop_edge.pair_id.second);
-    optimizer.addEdge(edge_se3);
-  }*/
+  odom_pose_array_msg.header = map_array_msg.header;
+  icp_pose_array_msg.header = map_array_msg.header;
 
-  optimizer.initializeOptimization();
-  optimizer.optimize(10);
-  optimizer.save("pose_graph.g2o");
-
-  /* modified_map publish */
-  std::cout << "modified_map publish" << std::endl;
-  vox_nav_slam_msgs::msg::MapArray modified_map_array_msg;
-  modified_map_array_msg.header = map_array_msg.header;
-  nav_msgs::msg::Path path;
-  path.header.frame_id = "map";
-  pcl::PointCloud<pcl::PointXYZI>::Ptr map_ptr(new pcl::PointCloud<pcl::PointXYZI>());
-  for (int i = 0; i < submaps_size; i++)
-  {
-    g2o::VertexSE3* vertex_se3 = static_cast<g2o::VertexSE3*>(optimizer.vertex(i));
-    Eigen::Affine3d se3 = vertex_se3->estimate();
-    geometry_msgs::msg::Pose pose = tf2::toMsg(se3);
-
-    /* map */
-    Eigen::Affine3d previous_affine;
-    tf2::fromMsg(map_array_msg.submaps[i].pose, previous_affine);
-
-    pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_ptr(new pcl::PointCloud<pcl::PointXYZI>());
-    pcl::PointCloud<pcl::PointXYZI>::Ptr transformed_cloud_ptr(new pcl::PointCloud<pcl::PointXYZI>());
-    pcl::fromROSMsg(map_array_msg.submaps[i].cloud, *cloud_ptr);
-
-    pcl::transformPointCloud(*cloud_ptr, *transformed_cloud_ptr, se3.matrix().cast<float>());
-    sensor_msgs::msg::PointCloud2::SharedPtr cloud_msg_ptr(new sensor_msgs::msg::PointCloud2);
-    pcl::toROSMsg(*transformed_cloud_ptr, *cloud_msg_ptr);
-    *map_ptr += *transformed_cloud_ptr;
-
-    /* submap */
-    vox_nav_slam_msgs::msg::SubMap submap;
-    submap.header = map_array_msg.submaps[i].header;
-    submap.pose = pose;
-    submap.cloud = *cloud_msg_ptr;
-    modified_map_array_msg.submaps.push_back(submap);
-
-    /* path */
-    geometry_msgs::msg::PoseStamped pose_stamped;
-    pose_stamped.header = submap.header;
-    pose_stamped.pose = submap.pose;
-    path.poses.push_back(pose_stamped);
-  }
-
-  modified_map_array_pub_->publish(modified_map_array_msg);
-  modified_path_pub_->publish(path);
-
-  sensor_msgs::msg::PointCloud2::SharedPtr map_msg_ptr(new sensor_msgs::msg::PointCloud2);
-  pcl::toROSMsg(*map_ptr, *map_msg_ptr);
-  map_msg_ptr->header.frame_id = "map";
-  modified_map_pub_->publish(*map_msg_ptr);
+  odom_pose_array_pub_->publish(odom_pose_array_msg);
+  icp_pose_array_pub_->publish(icp_pose_array_msg);
 }
 
 pcl::Registration<pcl::PointXYZI, pcl::PointXYZI>::Ptr

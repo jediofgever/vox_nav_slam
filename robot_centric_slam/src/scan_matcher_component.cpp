@@ -16,7 +16,6 @@ FastGICPScanMatcher::FastGICPScanMatcher(const rclcpp::NodeOptions& options)  //
   tf_buffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
   tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
   broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
-
   mutex_ = std::make_shared<std::mutex>();
   icp_thread_ = std::make_shared<std::thread>();
   icp_future_ = std::make_shared<std::future<void>>();
@@ -178,7 +177,7 @@ void FastGICPScanMatcher::initializeMap(const pcl::PointCloud<pcl::PointXYZI>::P
   submap.cloud.header.frame_id = "map";
   submap.cloud.header.stamp = now();
   submap.odometry = *latest_odom_msg_;
-  sub_maps_->header.frame_id = header.frame_id;
+  sub_maps_->header.frame_id = "map";
   sub_maps_->header.stamp = now();
   sub_maps_->origin = current_pose_->pose;
   sub_maps_->submaps.push_back(submap);
@@ -354,18 +353,6 @@ void FastGICPScanMatcher::insertScantoMap(const pcl::PointCloud<pcl::PointXYZI>:
     *targeted_cloud_ += *transformed_tmp_ptr;
   }
 
-  // remove subclouds that are more than max_num_targeted_clouds
-  if (num_submaps > icp_params_.max_num_targeted_clouds)
-  {
-    sub_maps_->submaps.erase(sub_maps_->submaps.begin(),
-                             sub_maps_->submaps.begin() + num_submaps - icp_params_.max_num_targeted_clouds);
-  }
-  if (icp_params_.debug)
-  {
-    RCLCPP_INFO(get_logger(), "There is %d Targeted clouds.", sub_maps_->submaps.size());
-  }
-
-  /* map array */
   sensor_msgs::msg::PointCloud2::SharedPtr cloud_msg_ptr(new sensor_msgs::msg::PointCloud2);
   pcl::toROSMsg(*cloud_downsampled, *cloud_msg_ptr);
 
@@ -380,8 +367,21 @@ void FastGICPScanMatcher::insertScantoMap(const pcl::PointCloud<pcl::PointXYZI>:
   submap.cloud.header.stamp = now();
   submap.odometry = *latest_odom_msg_;
   sub_maps_->header.stamp = now();
+  sub_maps_->header.frame_id = "map";
   sub_maps_->submaps.push_back(submap);
-  sub_maps_->origin = sub_maps_->submaps[0].pose;
+
+  // remove subclouds that are more than max_num_targeted_clouds
+  if (num_submaps >= icp_params_.max_num_targeted_clouds)
+  {
+    sub_maps_->submaps.erase(sub_maps_->submaps.begin(),
+                             sub_maps_->submaps.begin() + num_submaps - icp_params_.max_num_targeted_clouds + 1);
+  }
+  if (icp_params_.debug)
+  {
+    RCLCPP_INFO(get_logger(), "There is %d Targeted clouds.", sub_maps_->submaps.size());
+  }
+
+  sub_maps_->origin = sub_maps_->submaps[0].odometry.pose.pose;
   sub_maps_pub_->publish(*sub_maps_);
 
   is_map_updated_ = true;

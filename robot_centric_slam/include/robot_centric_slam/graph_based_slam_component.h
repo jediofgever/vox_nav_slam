@@ -67,6 +67,7 @@ extern "C" {
 #include <geometry_msgs/msg/pose_array.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <nav_msgs/msg/path.hpp>
+#include <visualization_msgs/msg/marker_array.hpp>
 
 #include <fast_gicp/gicp/fast_gicp.hpp>
 #include <fast_gicp/gicp/fast_gicp_st.hpp>
@@ -128,6 +129,8 @@ public:
   pcl::Registration<pcl::PointXYZI, pcl::PointXYZI>::Ptr createRegistration(std::string method, int num_threads,
                                                                             double voxel_resolution = 0.2);
 
+  void icpThread();
+
 private:
   std::mutex mutex_;
 
@@ -139,11 +142,17 @@ private:
   std::shared_ptr<pcl::Registration<pcl::PointXYZI, pcl::PointXYZI>> registration_;
   std::shared_ptr<pcl::VoxelGrid<pcl::PointXYZI>> voxelgrid_;
 
+  std::shared_ptr<std::thread> icp_thread_;
+
   vox_nav_slam_msgs::msg::MapArray::SharedPtr map_array_msg_;
   rclcpp::Subscription<vox_nav_slam_msgs::msg::MapArray>::SharedPtr map_array_sub_;
   rclcpp::Publisher<vox_nav_slam_msgs::msg::MapArray>::SharedPtr modified_map_array_pub_;
   rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr modified_path_pub_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr modified_map_pub_;
+  rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr icp_uncertainty_marker_pub_;
+
+  rclcpp::Publisher<geometry_msgs::msg::PoseArray>::SharedPtr icp_pose_array_pub_;
+  rclcpp::Publisher<geometry_msgs::msg::PoseArray>::SharedPtr odom_pose_array_pub_;
 
   // ICP parameters
   ICPParameters icp_params_;

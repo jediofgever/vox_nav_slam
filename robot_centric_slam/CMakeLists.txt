@@ -26,6 +26,7 @@ find_package(rclcpp_components REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
+find_package(visualization_msgs REQUIRED)
 find_package(std_srvs REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(tf2_eigen REQUIRED)
@@ -35,11 +36,11 @@ find_package(pcl_conversions REQUIRED)
 find_package(vox_nav_slam_msgs REQUIRED)
 find_package(PCL REQUIRED)
 find_package(g2o REQUIRED
-COMPONENTS
-g2o::core
-g2o::types_slam3d
-g2o::solver_eigen
-)
+                  COMPONENTS
+                  g2o::core
+                  g2o::types_slam3d
+                  g2o::solver_eigen
+                  )
 find_package(OpenMP)
 find_package(fast_gicp REQUIRED)
 find_package(CUDA REQUIRED)
@@ -48,7 +49,6 @@ find_package(GTSAM REQUIRED)
 option(BUILD_VGICP_CUDA "Build GPU-powered VGICP" ON)
 add_definitions(-BUILD_VGICP_CUDA)
 add_definitions(${PCL_DEFINITIONS})
-
 
 if (OPENMP_FOUND)
     set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
@@ -72,6 +72,7 @@ set(dependencies
     geometry_msgs 
     sensor_msgs
     nav_msgs
+    visualization_msgs
     vox_nav_slam_msgs)
 
 add_library(graph_based_slam_component SHARED src/graph_based_slam_component.cpp)

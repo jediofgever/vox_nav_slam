@@ -110,8 +110,8 @@ void GTSAMComponent::doPoseAdjustment(vox_nav_slam_msgs::msg::MapArray& map_arra
     return;
   }
 
-  RCLCPP_INFO(get_logger(), "Doing pose adjustment...");
-  double lag = 2.0;
+  RCLCPP_INFO(get_logger(), "Doing pose adjustment with %d poses...", submap_size);
+  double lag = 10.0;
 
   // Create a fixed lag smoother
   // The Batch version uses Levenberg-Marquardt to perform the nonlinear optimization
@@ -130,10 +130,10 @@ void GTSAMComponent::doPoseAdjustment(vox_nav_slam_msgs::msg::MapArray& map_arra
 
   // Create a pose prior factor for the first submap
   gtsam::Pose3 first_pose = gtsam::Pose3(
-      gtsam::Rot3::Quaternion(map_array_msg.submaps[0].pose.orientation.w, map_array_msg.submaps[0].pose.orientation.x,
-                              map_array_msg.submaps[0].pose.orientation.y, map_array_msg.submaps[0].pose.orientation.z),
-      gtsam::Point3(map_array_msg.submaps[0].pose.position.x, map_array_msg.submaps[0].pose.position.y,
-                    map_array_msg.submaps[0].pose.position.z));
+      gtsam::Rot3::Quaternion(map_array_msg.origin.orientation.w, map_array_msg.origin.orientation.x,
+                              map_array_msg.origin.orientation.y, map_array_msg.origin.orientation.z),
+      gtsam::Point3(map_array_msg.origin.position.x, map_array_msg.origin.position.y, map_array_msg.origin.position.z));
+
   gtsam::noiseModel::Diagonal::shared_ptr priorNoise =
       gtsam::noiseModel::Diagonal::Sigmas((gtsam::Vector(6) << 0.01, 0.01, 0.01, 0.01, 0.01, 0.01).finished());
 
@@ -143,17 +143,14 @@ void GTSAMComponent::doPoseAdjustment(vox_nav_slam_msgs::msg::MapArray& map_arra
 
   auto initial_time = map_array_msg.submaps[0].header.stamp.sec + map_array_msg.submaps[0].header.stamp.nanosec * 1e-9;
 
+  first_pose.print("First pose: ");
+
   for (size_t i = 1; i < submap_size; i++)
   {
     auto prev_submap = map_array_msg.submaps[i - 1];
     auto curr_submap = map_array_msg.submaps[i];
 
     // Guess current pose
-    gtsam::Pose3 curr_pose = gtsam::Pose3(
-        gtsam::Rot3::Quaternion(curr_submap.pose.orientation.w, curr_submap.pose.orientation.x,
-                                curr_submap.pose.orientation.y, curr_submap.pose.orientation.z),
-        gtsam::Point3(curr_submap.pose.position.x, curr_submap.pose.position.y, curr_submap.pose.position.z));
-    newValues.insert(i, curr_pose);
 
     // ICP measurements
     gtsam::Pose3 prev_icp_pose = gtsam::Pose3(
@@ -181,39 +178,43 @@ void GTSAMComponent::doPoseAdjustment(vox_nav_slam_msgs::msg::MapArray& map_arra
     gtsam::noiseModel::Diagonal::shared_ptr priorNoise =
         gtsam::noiseModel::Diagonal::Sigmas((gtsam::Vector(6) << 0.01, 0.01, 0.01, 0.01, 0.01, 0.01).finished());
 
+    // Set the guess to Odom displacement
+    newValues.insert(i, prev_odom_pose.between(curr_odom_pose));
+
     newFactors.add(gtsam::BetweenFactor<gtsam::Pose3>(i - 1, i, prev_icp_pose.between(curr_icp_pose), priorNoise));
     newFactors.add(gtsam::BetweenFactor<gtsam::Pose3>(i - 1, i, prev_odom_pose.between(curr_odom_pose), priorNoise));
 
     // Time stamp for the new factor
     auto curr_time = curr_submap.header.stamp.sec + curr_submap.header.stamp.nanosec * 1e-9;
     newTimestamps.insert(std::make_pair(i, curr_time - initial_time));
-
-    smootherBatch.update(newFactors, newValues, newTimestamps);
-    smootherISAM2.update(newFactors, newValues, newTimestamps);
-    for (size_t i = 1; i < 2; ++i)
-    {  // Optionally perform multiple iSAM2 iterations
-      smootherISAM2.update();
-    }
-
-    // Print the optimized current pose
-    std::cout << std::setprecision(5) << "Timestamp = " << curr_time - initial_time << std::endl;
-    smootherBatch.calculateEstimate<gtsam::Pose3>(i).print("Batch Estimate:");
-    smootherISAM2.calculateEstimate<gtsam::Pose3>(i).print("iSAM2 Estimate:");
-    std::cout << std::endl;
-
-    // Clear contains for the next iteration
-    newTimestamps.clear();
-    newValues.clear();
-    newFactors.resize(0);
   }
+
+  smootherBatch.update(newFactors, newValues, newTimestamps);
+  // smootherISAM2.update(newFactors, newValues, newTimestamps);
+  for (size_t k = 1; k < 2; ++k)
+  {  // Optionally perform multiple iSAM2 iterations
+     // smootherISAM2.update();
+  }
+
+  // Clear contains for the next iteration
+  newTimestamps.clear();
+  newValues.clear();
+  newFactors.resize(0);
+
+  // Print the optimized current pose
+  auto last_time = map_array_msg.submaps[submap_size - 1].header.stamp.sec +
+                   map_array_msg.submaps[submap_size - 1].header.stamp.nanosec * 1e-9;
+  std::cout << std::setprecision(5) << "Timestamp = " << last_time - initial_time << std::endl;
+  smootherBatch.calculateEstimate<gtsam::Pose3>(submap_size - 1).print("Batch Estimate:");
+  // smootherISAM2.calculateEstimate<gtsam::Pose3>(submap_size - 1).print("iSAM2 Estimate:");
+  std::cout << std::endl;
 
   // Transform back the optimized poses wtih respect to the first submap
   // isam estimate
-  gtsam::Pose3 isam_pose = smootherISAM2.calculateEstimate<gtsam::Pose3>(submap_size - 1);
+  gtsam::Pose3 isam_pose = smootherBatch.calculateEstimate<gtsam::Pose3>(submap_size - 1);
 
-  first_pose = isam_pose * first_pose;
+  first_pose = first_pose * isam_pose;
 
-  // Publish a nav_msgs::Odometry message
   path_msg_->header.frame_id = "map";
   path_msg_->header.stamp = now();
   geometry_msgs::msg::PoseStamped pose_stamped;
