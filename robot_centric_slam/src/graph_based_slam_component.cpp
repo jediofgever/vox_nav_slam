@@ -111,7 +111,7 @@ void GraphBasedSlamComponent::icpThread()
   {
     std::lock_guard<std::mutex> lock(mutex_);
 
-    if (map_array_msg_->submaps.size() < 5)
+    if (map_array_msg_->submaps.size() <= icp_params_.num_adjacent_pose_constraints)
     {
       continue;
     }
@@ -121,7 +121,7 @@ void GraphBasedSlamComponent::icpThread()
     visualization_msgs::msg::Marker marker;
 
     // Optimize submaps
-    for (int i = 4; i < map_array_msg_->submaps.size(); i++)
+    for (int i = icp_params_.num_adjacent_pose_constraints; i < map_array_msg_->submaps.size(); i++)
     {
       Eigen::Affine3d curr_ith_cloud_transform;
       tf2::fromMsg(map_array_msg_->submaps[i].odometry.pose.pose, curr_ith_cloud_transform);
@@ -137,16 +137,14 @@ void GraphBasedSlamComponent::icpThread()
 
       std::vector<Eigen::VectorXd> icp_measurements;
 
-      for (int j = i - 4; j < i; j++)
+      for (int j = i - icp_params_.num_adjacent_pose_constraints; j < i; j++)
       {
-        // Get transform between two submaps
         Eigen::Affine3d prev_jth_transform;
         tf2::fromMsg(map_array_msg_->submaps[j].odometry.pose.pose, prev_jth_transform);
 
         Eigen::Matrix4f diff =
             prev_jth_transform.inverse().matrix().cast<float>() * curr_ith_cloud_transform.matrix().cast<float>();
 
-        // Transform submap pointcloud
         pcl::PointCloud<pcl::PointXYZI>::Ptr prev_jth_cloud(new pcl::PointCloud<pcl::PointXYZI>);
         pcl::fromROSMsg(map_array_msg_->submaps[j].cloud, *prev_jth_cloud);
         pcl::transformPointCloud(*prev_jth_cloud, *prev_jth_cloud, prev_jth_transform.matrix().cast<float>());
@@ -192,8 +190,21 @@ void GraphBasedSlamComponent::icpThread()
                                 Eigen::AngleAxisf(mean(4), Eigen::Vector3f::UnitY()) *
                                 Eigen::AngleAxisf(mean(3), Eigen::Vector3f::UnitX()).matrix();
       transform.block<3, 3>(0, 0) = rot_mat;
-
       transforms.push_back(transform);
+
+      Eigen::Quaternionf quat_eig(rot_mat);
+      geometry_msgs::msg::Quaternion quat_msg = tf2::toMsg(quat_eig.cast<double>());
+      map_array_msg_->submaps[i].pose.position.x = mean(0);
+      map_array_msg_->submaps[i].pose.position.y = mean(1);
+      map_array_msg_->submaps[i].pose.position.z = mean(2);
+      map_array_msg_->submaps[i].pose.orientation = quat_msg;
+      map_array_msg_->submaps[i].pose = map_array_msg_->submaps[i].odometry.pose.pose;
+      map_array_msg_->submaps[i].odometry.pose.covariance[0] = std::max(10.0 * covariance(0, 0), 0.05);
+      map_array_msg_->submaps[i].odometry.pose.covariance[7] = std::max(10.0 * covariance(1, 1), 0.05);
+      map_array_msg_->submaps[i].odometry.pose.covariance[14] = std::max(10.0 * covariance(2, 2), 0.05);
+      map_array_msg_->submaps[i].odometry.pose.covariance[21] = std::max(10.0 * covariance(3, 3), 0.05);
+      map_array_msg_->submaps[i].odometry.pose.covariance[28] = std::max(10.0 * covariance(4, 4), 0.05);
+      map_array_msg_->submaps[i].odometry.pose.covariance[35] = std::max(10.0 * covariance(5, 5), 0.05);
 
       // Publish uncertainty marker
       marker.header = map_array_msg_->header;
@@ -208,15 +219,11 @@ void GraphBasedSlamComponent::icpThread()
       marker.scale.x = std::max(10.0 * covariance(0, 0), 0.05);
       marker.scale.y = std::max(10.0 * covariance(1, 1), 0.05);
       marker.scale.z = std::max(10.0 * covariance(2, 2), 0.05);
-      marker.color.a = 0.25;
-      marker.color.r = 1.0;
+      marker.color.a = 0.5;
+      marker.color.r = 0.0;
       marker.color.g = 0.0;
-      marker.color.b = 0.0;
+      marker.color.b = 1.0;
       marker_array.markers.push_back(marker);
-
-      // print covariance
-      std::cout << "covariance: " << std::endl;
-      std::cout << covariance << std::endl;
     }
 
     // Publish modified path which is residing in the transforms
@@ -239,6 +246,23 @@ void GraphBasedSlamComponent::icpThread()
 
     modified_path_pub_->publish(modified_path);
     icp_uncertainty_marker_pub_->publish(marker_array);
+
+    // Publish modified map
+    sensor_msgs::msg::PointCloud2 modified_map;
+    pcl::PointCloud<pcl::PointXYZI>::Ptr modified_map_ptr(new pcl::PointCloud<pcl::PointXYZI>());
+    for (int i = 0; i < map_array_msg_->submaps.size(); i++)
+    {
+      pcl::PointCloud<pcl::PointXYZI>::Ptr tmp_ptr(new pcl::PointCloud<pcl::PointXYZI>());
+      pcl::fromROSMsg(map_array_msg_->submaps[i].cloud, *tmp_ptr);
+      pcl::PointCloud<pcl::PointXYZI>::Ptr transformed_tmp_ptr(new pcl::PointCloud<pcl::PointXYZI>());
+      Eigen::Affine3d submap_affine;
+      tf2::fromMsg(map_array_msg_->submaps[i].pose, submap_affine);
+      pcl::transformPointCloud(*tmp_ptr, *transformed_tmp_ptr, submap_affine.matrix());
+      *modified_map_ptr += *transformed_tmp_ptr;
+    }
+    pcl::toROSMsg(*modified_map_ptr, modified_map);
+    modified_map.header = map_array_msg_->header;
+    modified_map_pub_->publish(modified_map);
   }
 }
 
