@@ -124,12 +124,13 @@ public:
   explicit GraphBasedSlamComponent(const rclcpp::NodeOptions& options);
 
   void mapArrayCallback(const vox_nav_slam_msgs::msg::MapArray::ConstSharedPtr msg);
-  void doPoseAdjustment(vox_nav_slam_msgs::msg::MapArray map_array_msg);
 
   pcl::Registration<pcl::PointXYZI, pcl::PointXYZI>::Ptr createRegistration(std::string method, int num_threads,
                                                                             double voxel_resolution = 0.2);
 
   void icpThread();
+
+  void optimizeSubmapGraph(std::vector<Eigen::Matrix4f>& refined_transforms);
 
 private:
   std::mutex mutex_;
@@ -159,13 +160,6 @@ private:
 
   bool initial_map_array_received_{ false };
   bool is_map_array_updated_{ false };
-
-  struct LoopEdge
-  {
-    std::pair<int, int> pair_id;
-    Eigen::Isometry3d relative_pose;
-  };
-  std::vector<LoopEdge> loop_edges_;
 };
 }  // namespace graphslam
 
