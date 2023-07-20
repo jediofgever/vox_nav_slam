@@ -1,5 +1,5 @@
 #include "robot_centric_slam/graph_based_slam_component.h"
-#include "robot_centric_slam/scan_matcher_component.hpp"
+#include "robot_centric_slam/fast_gicp_scan_matcher_component.hpp"
 #include "robot_centric_slam/gtsam_component.h"
 #include <rclcpp/rclcpp.hpp>
 

@@ -27,7 +27,6 @@ GTSAMComponent::GTSAMComponent(const rclcpp::NodeOptions& options) : rclcpp::Nod
   declare_parameter("max_num_targeted_clouds", icp_params_.max_num_targeted_clouds);
   declare_parameter("min_dist_to_update_map", icp_params_.min_dist_to_update_map);
   declare_parameter("publish_tf", icp_params_.publish_tf);
-  declare_parameter("num_adjacent_pose_constraints", icp_params_.num_adjacent_pose_constraints);
   declare_parameter("debug", icp_params_.debug);
 
   get_parameter("x_bound", icp_params_.x_bound);
@@ -42,7 +41,6 @@ GTSAMComponent::GTSAMComponent(const rclcpp::NodeOptions& options) : rclcpp::Nod
   get_parameter("max_num_targeted_clouds", icp_params_.max_num_targeted_clouds);
   get_parameter("min_dist_to_update_map", icp_params_.min_dist_to_update_map);
   get_parameter("publish_tf", icp_params_.publish_tf);
-  get_parameter("num_adjacent_pose_constraints", icp_params_.num_adjacent_pose_constraints);
   get_parameter("debug", icp_params_.debug);
 
   // Init registration with given parameters
@@ -80,7 +78,6 @@ GTSAMComponent::GTSAMComponent(const rclcpp::NodeOptions& options) : rclcpp::Nod
   RCLCPP_INFO_STREAM(get_logger(), "method: " << icp_params_.method);
   RCLCPP_INFO_STREAM(get_logger(), "num_threads: " << icp_params_.num_threads);
   RCLCPP_INFO_STREAM(get_logger(), "max_num_targeted_clouds: " << icp_params_.max_num_targeted_clouds);
-  RCLCPP_INFO_STREAM(get_logger(), "num_adjacent_pose_constraints: " << icp_params_.num_adjacent_pose_constraints);
   RCLCPP_INFO_STREAM(get_logger(), "debug: " << icp_params_.debug);
 
   RCLCPP_INFO(get_logger(), "Creating...");

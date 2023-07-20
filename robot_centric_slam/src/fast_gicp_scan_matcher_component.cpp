@@ -1,4 +1,4 @@
-#include "robot_centric_slam/scan_matcher_component.hpp"
+#include "robot_centric_slam/fast_gicp_scan_matcher_component.hpp"
 
 namespace vox_nav_slam
 {
@@ -98,6 +98,15 @@ void FastGICPScanMatcher::odomCallback(const nav_msgs::msg::Odometry::ConstShare
 {
   std::lock_guard<std::mutex> lock(*mutex_);
   latest_odom_msg_ = std::make_shared<nav_msgs::msg::Odometry>(*odom);
+
+  // add gaussian noise to the odometry
+  std::random_device rd{};
+  std::mt19937 gen{ rd() };
+  std::normal_distribution<> d{ 0, 0.05 };
+  latest_odom_msg_->pose.pose.position.x += d(gen);
+  latest_odom_msg_->pose.pose.position.y += d(gen);
+  latest_odom_msg_->pose.pose.position.z += d(gen);
+
   is_odom_updated_ = true;
 }
 
@@ -189,6 +198,9 @@ void FastGICPScanMatcher::performRegistration(const pcl::PointCloud<pcl::PointXY
 {
   if (icp_future_->valid() && mapping_flag_)
   {
+    // record the time taken by one cycle
+    auto begin = std::chrono::steady_clock::now();
+
     auto status = icp_future_->wait_for(std::chrono::milliseconds(1));
     if (status == std::future_status::ready)
     {

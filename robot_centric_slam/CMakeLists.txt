@@ -79,9 +79,9 @@ add_library(graph_based_slam_component SHARED src/graph_based_slam_component.cpp
 ament_target_dependencies(graph_based_slam_component ${dependencies})
 target_compile_definitions(graph_based_slam_component PRIVATE "GS_GBS_BUILDING_DLL")
 
-add_library(scan_matcher_component SHARED src/scan_matcher_component.cpp)
-ament_target_dependencies(scan_matcher_component ${dependencies})
-target_compile_definitions(scan_matcher_component PRIVATE "GS_GBS_BUILDING_DLL")
+add_library(fast_gicp_scan_matcher_component SHARED src/fast_gicp_scan_matcher_component.cpp)
+ament_target_dependencies(fast_gicp_scan_matcher_component ${dependencies})
+target_compile_definitions(fast_gicp_scan_matcher_component PRIVATE "GS_GBS_BUILDING_DLL")
 
 add_library(gtsam_component SHARED src/gtsam_component.cpp)
 ament_target_dependencies(gtsam_component ${dependencies})
@@ -96,7 +96,7 @@ include_directories(
 )
 target_link_libraries(vox_nav_slam_node
                       graph_based_slam_component 
-                      scan_matcher_component
+                      fast_gicp_scan_matcher_component
                       gtsam_component
                       ${PCL_LIBRARIES}
                       ${fast_gicp_LIBRARIES}
@@ -108,15 +108,21 @@ target_link_libraries(vox_nav_slam_node
 
 link_directories(${PCL_LIBRARY_DIRS})
 
+add_executable(ros2bag_analyzer src/ros2bag_analyzer.cpp)
+ament_target_dependencies(ros2bag_analyzer ${dependencies})
+include_directories(include)
+target_link_libraries(ros2bag_analyzer ${PCL_LIBRARIES})
+link_directories(${PCL_LIBRARY_DIRS})
+
 rclcpp_components_register_nodes(graph_based_slam_component 
   "graphslam::GraphBasedSlamComponent")
-rclcpp_components_register_nodes(scan_matcher_component 
+rclcpp_components_register_nodes(fast_gicp_scan_matcher_component 
   "vox_nav_slam::FastGICPScanMatcher")
 rclcpp_components_register_nodes(gtsam_component 
   "vox_nav_slam::GTSAMComponent")
 
 ament_export_libraries(graph_based_slam_component)
-ament_export_libraries(scan_matcher_component)
+ament_export_libraries(fast_gicp_scan_matcher_component)
 ament_export_libraries(gtsam_component)
 
 install(
@@ -127,13 +133,14 @@ install(
   DESTINATION share/${PROJECT_NAME})
 install(TARGETS
   graph_based_slam_component
-  scan_matcher_component
+  fast_gicp_scan_matcher_component
   gtsam_component
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin)
 install(TARGETS 
   vox_nav_slam_node
+  ros2bag_analyzer
   DESTINATION lib/${PROJECT_NAME})
 
 ament_export_include_directories(include)

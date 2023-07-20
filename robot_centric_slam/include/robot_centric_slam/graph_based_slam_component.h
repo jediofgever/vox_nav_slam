@@ -143,8 +143,6 @@ private:
   std::shared_ptr<pcl::Registration<pcl::PointXYZI, pcl::PointXYZI>> registration_;
   std::shared_ptr<pcl::VoxelGrid<pcl::PointXYZI>> voxelgrid_;
 
-  std::shared_ptr<std::thread> icp_thread_;
-
   vox_nav_slam_msgs::msg::MapArray::SharedPtr map_array_msg_;
   rclcpp::Subscription<vox_nav_slam_msgs::msg::MapArray>::SharedPtr map_array_sub_;
   rclcpp::Publisher<vox_nav_slam_msgs::msg::MapArray>::SharedPtr modified_map_array_pub_;

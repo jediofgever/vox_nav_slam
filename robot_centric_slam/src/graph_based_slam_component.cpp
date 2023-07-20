@@ -81,8 +81,6 @@ GraphBasedSlamComponent::GraphBasedSlamComponent(const rclcpp::NodeOptions& opti
   RCLCPP_INFO_STREAM(get_logger(), "num_adjacent_pose_constraints: " << icp_params_.num_adjacent_pose_constraints);
   RCLCPP_INFO_STREAM(get_logger(), "debug: " << icp_params_.debug);
 
-  icp_thread_ = std::make_shared<std::thread>(std::bind(&GraphBasedSlamComponent::icpThread, this));
-
   RCLCPP_INFO(get_logger(), "Creating...");
 }
 
@@ -92,68 +90,69 @@ void GraphBasedSlamComponent::mapArrayCallback(const vox_nav_slam_msgs::msg::Map
   map_array_msg_ = std::make_shared<vox_nav_slam_msgs::msg::MapArray>(*msg_ptr);
   initial_map_array_received_ = true;
   is_map_array_updated_ = true;
+
+  icpThread();
 }
 
 void GraphBasedSlamComponent::icpThread()
 {
   // Optimize submaps in the loop until the node is shutdown
-  while (rclcpp::ok())
+  if (map_array_msg_->submaps.size() <= icp_params_.num_adjacent_pose_constraints)
   {
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (map_array_msg_->submaps.size() <= icp_params_.num_adjacent_pose_constraints)
-    {
-      continue;
-    }
-
-    // Optimize the subgraph and get refined transforms
-    // this function also publishes uncertainty markers
-    std::vector<Eigen::Matrix4f> refined_transforms;
-    optimizeSubmapGraph(refined_transforms);
-
-    // Publish modified path which is residing in the refined_transforms
-    nav_msgs::msg::Path modified_path;
-    modified_path.header = map_array_msg_->header;
-    for (auto&& i : refined_transforms)
-    {
-      geometry_msgs::msg::PoseStamped pose_stamped;
-      pose_stamped.header = map_array_msg_->header;
-      Eigen::Vector3f position = i.block<3, 1>(0, 3).cast<float>();
-      Eigen::Matrix3f rot_mat = i.block<3, 3>(0, 0).cast<float>();
-      Eigen::Quaternionf quat_eig(rot_mat);
-      geometry_msgs::msg::Quaternion quat_msg = tf2::toMsg(quat_eig.cast<double>());
-      pose_stamped.pose.position.x = position.x();
-      pose_stamped.pose.position.y = position.y();
-      pose_stamped.pose.position.z = position.z();
-      pose_stamped.pose.orientation = quat_msg;
-      modified_path.poses.push_back(pose_stamped);
-    }
-
-    modified_path_pub_->publish(modified_path);
-
-    // Publish modified map
-    sensor_msgs::msg::PointCloud2 modified_map;
-    pcl::PointCloud<pcl::PointXYZI>::Ptr modified_map_ptr(new pcl::PointCloud<pcl::PointXYZI>());
-    for (int i = icp_params_.num_adjacent_pose_constraints; i < map_array_msg_->submaps.size(); i++)
-    {
-      pcl::PointCloud<pcl::PointXYZI>::Ptr tmp_ptr(new pcl::PointCloud<pcl::PointXYZI>());
-      pcl::fromROSMsg(map_array_msg_->submaps[i].cloud, *tmp_ptr);
-      pcl::PointCloud<pcl::PointXYZI>::Ptr transformed_tmp_ptr(new pcl::PointCloud<pcl::PointXYZI>());
-      Eigen::Affine3d submap_affine;
-      tf2::fromMsg(map_array_msg_->submaps[i].pose, submap_affine);
-      pcl::transformPointCloud(*tmp_ptr, *transformed_tmp_ptr, submap_affine.matrix());
-      *modified_map_ptr += *transformed_tmp_ptr;
-    }
-    pcl::toROSMsg(*modified_map_ptr, modified_map);
-    modified_map.header = map_array_msg_->header;
-    modified_map_pub_->publish(modified_map);
+    return;
   }
+
+  // Optimize the subgraph and get refined transforms
+  // this function also publishes uncertainty markers
+  std::vector<Eigen::Matrix4f> refined_transforms;
+  optimizeSubmapGraph(refined_transforms);
+
+  // Publish modified path which is residing in the refined_transforms
+  nav_msgs::msg::Path modified_path;
+  modified_path.header = map_array_msg_->header;
+  for (auto&& i : refined_transforms)
+  {
+    geometry_msgs::msg::PoseStamped pose_stamped;
+    pose_stamped.header = map_array_msg_->header;
+    Eigen::Vector3f position = i.block<3, 1>(0, 3).cast<float>();
+    Eigen::Matrix3f rot_mat = i.block<3, 3>(0, 0).cast<float>();
+    Eigen::Quaternionf quat_eig(rot_mat);
+    geometry_msgs::msg::Quaternion quat_msg = tf2::toMsg(quat_eig.cast<double>());
+    pose_stamped.pose.position.x = position.x();
+    pose_stamped.pose.position.y = position.y();
+    pose_stamped.pose.position.z = position.z();
+    pose_stamped.pose.orientation = quat_msg;
+    modified_path.poses.push_back(pose_stamped);
+  }
+
+  modified_path_pub_->publish(modified_path);
+
+  // Publish modified map
+  sensor_msgs::msg::PointCloud2 modified_map;
+  pcl::PointCloud<pcl::PointXYZI>::Ptr modified_map_ptr(new pcl::PointCloud<pcl::PointXYZI>());
+  for (int i = icp_params_.num_adjacent_pose_constraints; i < map_array_msg_->submaps.size(); i++)
+  {
+    pcl::PointCloud<pcl::PointXYZI>::Ptr tmp_ptr(new pcl::PointCloud<pcl::PointXYZI>());
+    pcl::fromROSMsg(map_array_msg_->submaps[i].cloud, *tmp_ptr);
+    pcl::PointCloud<pcl::PointXYZI>::Ptr transformed_tmp_ptr(new pcl::PointCloud<pcl::PointXYZI>());
+    Eigen::Affine3d submap_affine;
+    tf2::fromMsg(map_array_msg_->submaps[i].pose, submap_affine);
+    pcl::transformPointCloud(*tmp_ptr, *transformed_tmp_ptr, submap_affine.matrix());
+    *modified_map_ptr += *transformed_tmp_ptr;
+  }
+  pcl::toROSMsg(*modified_map_ptr, modified_map);
+  modified_map.header = map_array_msg_->header;
+  modified_map_pub_->publish(modified_map);
 }
 
 void GraphBasedSlamComponent::optimizeSubmapGraph(std::vector<Eigen::Matrix4f>& refined_transforms)
 {
+  // report the cycle time
+  auto start = std::chrono::high_resolution_clock::now();
+
   // Optimize submaps
   // The accumulated submaps shall be greater than num_adjacent_pose_constraints
-  // Publish spheres to indicate uncertainty
+  // Publish spheres/ellipses to indicate uncertainty
   visualization_msgs::msg::MarkerArray marker_array;
   for (int i = icp_params_.num_adjacent_pose_constraints; i < map_array_msg_->submaps.size(); i++)
   {
@@ -185,9 +184,6 @@ void GraphBasedSlamComponent::optimizeSubmapGraph(std::vector<Eigen::Matrix4f>& 
       Eigen::Affine3d prev_jth_transform;
       tf2::fromMsg(map_array_msg_->submaps[j].odometry.pose.pose, prev_jth_transform);
 
-      Eigen::Matrix4f diff =
-          prev_jth_transform.inverse().matrix().cast<float>() * curr_ith_cloud_transform.matrix().cast<float>();
-
       pcl::PointCloud<pcl::PointXYZI>::Ptr prev_jth_cloud(new pcl::PointCloud<pcl::PointXYZI>);
       pcl::fromROSMsg(map_array_msg_->submaps[j].cloud, *prev_jth_cloud);
       pcl::transformPointCloud(*prev_jth_cloud, *prev_jth_cloud, prev_jth_transform.matrix().cast<float>());
@@ -218,6 +214,8 @@ void GraphBasedSlamComponent::optimizeSubmapGraph(std::vector<Eigen::Matrix4f>& 
       counter++;
     }
 
+    icp_measurements_vec.push_back(odom_vec_joined);
+
     Eigen::VectorXd mean = Eigen::VectorXd::Zero(icp_measurements_vec[0].size());
     for (int m = 0; m < icp_measurements_vec.size(); m++)
     {
@@ -231,6 +229,12 @@ void GraphBasedSlamComponent::optimizeSubmapGraph(std::vector<Eigen::Matrix4f>& 
       covariance += (icp_measurements_vec[m] - mean) * (icp_measurements_vec[m] - mean).transpose();
     }
     covariance /= icp_measurements_vec.size();
+
+    // print the covariance matrix
+    if (icp_params_.debug)
+    {
+      RCLCPP_INFO_STREAM(get_logger(), "Covariance matrix:  \n" << covariance);
+    }
 
     auto best_icp_measurement = icp_measurements_mat[min_icp_cost_index];
 
@@ -275,6 +279,10 @@ void GraphBasedSlamComponent::optimizeSubmapGraph(std::vector<Eigen::Matrix4f>& 
     marker_array.markers.push_back(marker);
   }
   icp_uncertainty_marker_pub_->publish(marker_array);
+
+  auto end = std::chrono::high_resolution_clock::now();
+  std::chrono::duration<double> elapsed = end - start;
+  RCLCPP_INFO_STREAM(get_logger(), "Cycle time: " << elapsed.count());
 }
 
 pcl::Registration<pcl::PointXYZI, pcl::PointXYZI>::Ptr
