@@ -132,6 +132,7 @@ void FastGICPScanMatcher::cloudCallback(const sensor_msgs::msg::PointCloud2::Con
     tf2::fromMsg(latest_odom_msg_->pose.pose, current_map_origin);
     current_map_origin_ = current_map_origin.matrix().cast<float>();
     initializeMap(cloud_pcl, cloud->header);
+
     return;
   }
 
@@ -204,16 +205,17 @@ void FastGICPScanMatcher::performRegistration(const pcl::PointCloud<pcl::PointXY
     auto status = icp_future_->wait_for(std::chrono::milliseconds(1));
     if (status == std::future_status::ready)
     {
-      if (is_map_updated_)
+      if (is_map_updated_ && targeted_cloud_->size() > 0)
       {
         is_map_updated_ = false;
+        RCLCPP_INFO(get_logger(), "Targeted cloud size: %d", targeted_cloud_->size());
 
         // crop the map to the ROI with crop box filter around current pose
-        pcl::CropBox<pcl::PointXYZI> crop_box_filter;
+        /*pcl::CropBox<pcl::PointXYZI> crop_box_filter;
         crop_box_filter.setInputCloud(targeted_cloud_);
         crop_box_filter.setMin(Eigen::Vector4f(-icp_params_.x_bound, -icp_params_.y_bound, -icp_params_.z_bound, 1.0));
         crop_box_filter.setMax(Eigen::Vector4f(icp_params_.x_bound, icp_params_.y_bound, icp_params_.z_bound, 1.0));
-        crop_box_filter.filter(*targeted_cloud_);
+        crop_box_filter.filter(*targeted_cloud_);*/
 
         // downsize targeted cloud
         pcl::VoxelGrid<pcl::PointXYZI> voxel_grid;
@@ -222,6 +224,11 @@ void FastGICPScanMatcher::performRegistration(const pcl::PointCloud<pcl::PointXY
                                icp_params_.map_voxel_size,  // NOLINT
                                icp_params_.map_voxel_size);
         voxel_grid.filter(*targeted_cloud_);
+
+        // print the size of the target cloud
+
+        RCLCPP_INFO(get_logger(), "Targeted cloud size: %d", targeted_cloud_->size());
+
         reg_->setInputTarget(targeted_cloud_);
       }
       mapping_flag_ = false;
@@ -363,6 +370,11 @@ void FastGICPScanMatcher::insertScantoMap(const pcl::PointCloud<pcl::PointXYZI>:
     tf2::fromMsg(sub_maps_->submaps[num_submaps - 1 - i].pose, submap_affine);
     pcl::transformPointCloud(*tmp_ptr, *transformed_tmp_ptr, submap_affine.matrix());
     *targeted_cloud_ += *transformed_tmp_ptr;
+
+    if (transformed_tmp_ptr->size() == 0)
+    {
+      RCLCPP_WARN(get_logger(), "Submap %d is empty", num_submaps - 1 - i);
+    }
   }
 
   sensor_msgs::msg::PointCloud2::SharedPtr cloud_msg_ptr(new sensor_msgs::msg::PointCloud2);
