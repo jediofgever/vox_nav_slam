@@ -41,6 +41,8 @@
 #include <geometry_msgs/msg/pose_array.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <nav_msgs/msg/path.hpp>
+#include <std_msgs/msg/bool.hpp>
+#include <visualization_msgs/msg/marker.hpp>
 
 #include <fast_gicp/gicp/fast_gicp.hpp>
 #include <fast_gicp/gicp/fast_gicp_st.hpp>
@@ -103,6 +105,8 @@ public:
 
   void odomCallback(const nav_msgs::msg::Odometry::ConstSharedPtr odom);
 
+  void episodeEndCallback(const std_msgs::msg::Bool::ConstSharedPtr episode_end);
+
   void initializeMap(const pcl::PointCloud<pcl::PointXYZI>::Ptr cloud,  // NOLINT
                      const std_msgs::msg::Header& header);
 
@@ -118,10 +122,12 @@ public:
 private:
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr cloud_subscriber_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_subscriber_;
+  rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr episode_end_subscriber_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr map_cloud_pub_;
   rclcpp::Publisher<vox_nav_slam_msgs::msg::MapArray>::SharedPtr sub_maps_pub_;
   rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pose_pub_;
   rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_pub_;
+  rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr marker_pub_;
 
   // tf buffer to get access to transfroms
   std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
@@ -134,6 +140,12 @@ private:
   geometry_msgs::msg::PoseStamped::SharedPtr current_pose_;
   nav_msgs::msg::Path::SharedPtr path_;
   vox_nav_slam_msgs::msg::MapArray::SharedPtr sub_maps_;
+
+  // Traverasblity estimation realted variables
+  std_msgs::msg::Bool::SharedPtr episode_end_;
+  // a buffer for last N odometry poses
+  std::queue<nav_msgs::msg::Odometry::SharedPtr> odom_buffer_;
+  float current_locomotion_error_{ 0.0 };
 
   ICPParameters icp_params_;
 

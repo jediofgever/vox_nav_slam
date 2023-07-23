@@ -12,6 +12,7 @@ FastGICPScanMatcher::FastGICPScanMatcher(const rclcpp::NodeOptions& options)  //
   current_pose_ = std::make_shared<geometry_msgs::msg::PoseStamped>();
   sub_maps_ = std::make_shared<vox_nav_slam_msgs::msg::MapArray>();
   path_ = std::make_shared<nav_msgs::msg::Path>();
+  episode_end_ = std::make_shared<std_msgs::msg::Bool>();
 
   tf_buffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
   tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
@@ -25,6 +26,9 @@ FastGICPScanMatcher::FastGICPScanMatcher(const rclcpp::NodeOptions& options)  //
       "cloud_in", rclcpp::SensorDataQoS(), std::bind(&FastGICPScanMatcher::cloudCallback, this, std::placeholders::_1));
   odom_subscriber_ = this->create_subscription<nav_msgs::msg::Odometry>(
       "odom_in", rclcpp::SensorDataQoS(), std::bind(&FastGICPScanMatcher::odomCallback, this, std::placeholders::_1));
+  episode_end_subscriber_ = this->create_subscription<std_msgs::msg::Bool>(
+      "end_of_episode", rclcpp::SensorDataQoS(),
+      std::bind(&FastGICPScanMatcher::episodeEndCallback, this, std::placeholders::_1));
   map_cloud_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(  // NOLINT
       "map_cloud", rclcpp::QoS(rclcpp::KeepLast(1)).reliable());
   sub_maps_pub_ = this->create_publisher<vox_nav_slam_msgs::msg::MapArray>(  // NOLINT
@@ -33,6 +37,8 @@ FastGICPScanMatcher::FastGICPScanMatcher(const rclcpp::NodeOptions& options)  //
       "pose", rclcpp::QoS(rclcpp::KeepLast(1)).reliable());
   path_pub_ = this->create_publisher<nav_msgs::msg::Path>(  // NOLINT
       "path", rclcpp::QoS(rclcpp::KeepLast(1)).reliable());
+  marker_pub_ = this->create_publisher<visualization_msgs::msg::Marker>(  // NOLINT
+      "locomotion_error_marker", rclcpp::QoS(rclcpp::KeepLast(1)).reliable());
 
   // Define parameters
   declare_parameter("x_bound", icp_params_.x_bound);
@@ -100,14 +106,113 @@ void FastGICPScanMatcher::odomCallback(const nav_msgs::msg::Odometry::ConstShare
   latest_odom_msg_ = std::make_shared<nav_msgs::msg::Odometry>(*odom);
 
   // add gaussian noise to the odometry
-  std::random_device rd{};
+  /*std::random_device rd{};
   std::mt19937 gen{ rd() };
   std::normal_distribution<> d{ 0, 0.05 };
   latest_odom_msg_->pose.pose.position.x += d(gen);
   latest_odom_msg_->pose.pose.position.y += d(gen);
-  latest_odom_msg_->pose.pose.position.z += d(gen);
+  latest_odom_msg_->pose.pose.position.z += d(gen);*/
+
+  // push this odom to the queue
+  odom_buffer_.push(std::make_shared<nav_msgs::msg::Odometry>(*odom));
+  // pop the odom from the queue if the message is older than 4 seconds
+  while (odom_buffer_.size() > 0)
+  {
+    auto oldest_odom = odom_buffer_.front();
+    auto newest_odom = odom_buffer_.back();
+    if (newest_odom->header.stamp.sec - oldest_odom->header.stamp.sec > 4)
+    {
+      odom_buffer_.pop();
+    }
+    else
+    {
+      break;
+    }
+  }
+
+  // Calculate Locomotion error based on the odom buffer
+  // use ((r * w1) + (r * w2)) / 2 to calculate the distance traveled
+  // r = wheel radius, w1 = angular velocity of left wheel, w2 = angular velocity of right wheel
+  auto w1 = 2.0;
+  auto w2 = 2.0;
+  auto r = 0.135;
+  auto distance = ((r * w1) + (r * w2)) / 2;
+  auto nominal_distance = distance * 4;  // multiply by 4 to get the distance traveled in 4 seconds
+
+  //  calculate actual distance traveled
+  auto odom1 = odom_buffer_.front();
+  auto odom2 = odom_buffer_.back();
+  auto x1 = odom1->pose.pose.position.x;
+  auto y1 = odom1->pose.pose.position.y;
+  auto x2 = odom2->pose.pose.position.x;
+  auto y2 = odom2->pose.pose.position.y;
+  auto actual_distance = std::sqrt(std::pow(x2 - x1, 2) + std::pow(y2 - y1, 2));
+
+  // calculate locomotion error
+  auto locomotion_error = std::abs(actual_distance - nominal_distance);
+
+  // Publish this error as RVIZ marker
+  visualization_msgs::msg::Marker marker;
+  marker.header.frame_id = "base_link";
+  marker.header.stamp = now();
+  marker.ns = "locomotion_error";
+  marker.id = 0;
+  marker.type = visualization_msgs::msg::Marker::TEXT_VIEW_FACING;
+  marker.action = visualization_msgs::msg::Marker::ADD;
+  marker.lifetime = rclcpp::Duration(rclcpp::Duration::from_seconds(3.0));
+  marker.pose.position.x = 0;
+  marker.pose.position.y = 0;
+  marker.pose.position.z = 1.0;
+  marker.scale.z = 0.5;
+  marker.scale.x = 0.5;
+  marker.scale.y = 0.5;
+  // Yellow color
+  marker.color.a = 1.0;
+  marker.color.r = 1.0;
+  marker.color.g = 1.0;
+  marker.color.b = 0.0;
+  std::stringstream ss;
+  ss << "Locomotion Error: " << locomotion_error;
+  marker.text = ss.str();
+  marker_pub_->publish(marker);
+  current_locomotion_error_ = locomotion_error;
 
   is_odom_updated_ = true;
+
+  // crop the map around the base_link and save it to disk together with locomotion error
+}
+
+void FastGICPScanMatcher::episodeEndCallback(const std_msgs::msg::Bool::ConstSharedPtr msg)
+{
+  // Once episode ends, Reset the map, start everything from the beginning
+  std::lock_guard<std::mutex> lock(*mutex_);
+  if (msg->data)
+  {
+    RCLCPP_INFO(get_logger(), "Episode ended, resetting the map");
+    // save the map to a file before resetting the map
+    std::string map_file_name = "map.pcd";
+    pcl::io::savePCDFileASCII(map_file_name, *targeted_cloud_);
+    RCLCPP_INFO(get_logger(), "Map saved to %s", map_file_name.c_str());
+
+    is_first_cloud_received_ = false;
+    is_map_updated_ = false;
+    mapping_flag_ = false;
+    is_odom_updated_ = false;
+    previous_odom_mat_ = Eigen::Matrix4f::Identity();
+    accumulated_translation_ = 0;
+    translation_from_previous_ = 0;
+    current_map_origin_ = Eigen::Matrix4f::Identity();
+    targeted_cloud_->clear();
+    sub_maps_->submaps.clear();
+    path_->poses.clear();
+    path_->header.frame_id = "map";
+    path_->header.stamp = now();
+    sub_maps_->header.frame_id = "map";
+    sub_maps_->header.stamp = now();
+    sub_maps_->origin = geometry_msgs::msg::Pose();
+    sub_maps_pub_->publish(*sub_maps_);
+    path_pub_->publish(*path_);
+  }
 }
 
 void FastGICPScanMatcher::cloudCallback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr cloud)
@@ -298,6 +403,20 @@ void FastGICPScanMatcher::performRegistration(const pcl::PointCloud<pcl::PointXY
   path_->header.stamp = now();
   path_->header.frame_id = "map";
   path_pub_->publish(*path_);
+
+  // Publish tf
+  if (icp_params_.publish_tf)
+  {
+    geometry_msgs::msg::TransformStamped transform_stamped;
+    transform_stamped.header.stamp = now();
+    transform_stamped.header.frame_id = "map";
+    transform_stamped.child_frame_id = "base_link";
+    transform_stamped.transform.translation.x = position.x();
+    transform_stamped.transform.translation.y = position.y();
+    transform_stamped.transform.translation.z = position.z();
+    transform_stamped.transform.rotation = quat_msg;
+    broadcaster_->sendTransform(transform_stamped);
+  }
 
   // Update map if translation is greater than threshold
   translation_from_previous_ = (position - previous_position_).norm();
