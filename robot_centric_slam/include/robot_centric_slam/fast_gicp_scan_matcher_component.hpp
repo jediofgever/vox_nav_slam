@@ -43,6 +43,7 @@
 #include <nav_msgs/msg/path.hpp>
 #include <std_msgs/msg/bool.hpp>
 #include <visualization_msgs/msg/marker.hpp>
+#include <visualization_msgs/msg/marker_array.hpp>
 
 #include <fast_gicp/gicp/fast_gicp.hpp>
 #include <fast_gicp/gicp/fast_gicp_st.hpp>
@@ -128,6 +129,7 @@ private:
   rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pose_pub_;
   rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_pub_;
   rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr marker_pub_;
+  rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr marker_array_pub_;
 
   // tf buffer to get access to transfroms
   std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
@@ -146,6 +148,10 @@ private:
   // a buffer for last N odometry poses
   std::queue<nav_msgs::msg::Odometry::SharedPtr> odom_buffer_;
   float current_locomotion_error_{ 0.0 };
+  // Publish this error as RVIZ marker
+  visualization_msgs::msg::MarkerArray locomotion_error_markers_;
+  int spehere_marker_id_{ 0 };
+  geometry_msgs::msg::PoseStamped::SharedPtr last_map_save_pose_;
 
   ICPParameters icp_params_;
 
