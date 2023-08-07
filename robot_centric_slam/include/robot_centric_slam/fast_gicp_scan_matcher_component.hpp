@@ -128,8 +128,6 @@ private:
   rclcpp::Publisher<vox_nav_slam_msgs::msg::MapArray>::SharedPtr sub_maps_pub_;
   rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pose_pub_;
   rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_pub_;
-  rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr marker_pub_;
-  rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr marker_array_pub_;
 
   // tf buffer to get access to transfroms
   std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
@@ -145,13 +143,6 @@ private:
 
   // Traverasblity estimation realted variables
   std_msgs::msg::Bool::SharedPtr episode_end_;
-  // a buffer for last N odometry poses
-  std::queue<nav_msgs::msg::Odometry::SharedPtr> odom_buffer_;
-  float current_locomotion_error_{ 0.0 };
-  // Publish this error as RVIZ marker
-  visualization_msgs::msg::MarkerArray locomotion_error_markers_;
-  int spehere_marker_id_{ 0 };
-  geometry_msgs::msg::PoseStamped::SharedPtr last_map_save_pose_;
 
   ICPParameters icp_params_;
 

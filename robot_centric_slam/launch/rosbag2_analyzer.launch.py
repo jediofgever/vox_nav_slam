@@ -14,13 +14,27 @@ def generate_launch_description():
         name="ros2bag_analyzer_node",
         # prefix=["xterm -e gdb -ex run --args"],
         remappings=[
-            ("/agv_cloud", "/AGV0/dobbie/sensing/lidar/top/pointcloud_raw"),
-            ("/agv_gnss_pose", "/AGV0/dobbie/sensing/gnss/pose"),
+            ("/agv_cloud", "/AGV4/dobbie/sensing/lidar/top/pointcloud_raw"),
+            ("/agv_gnss_pose", "/AGV4/dobbie/sensing/gnss/pose"),
+        ],
+        output="screen",
+    )
+
+    locomotion_analyzer = Node(
+        package="robot_centric_slam",
+        executable="locomotion_analyzer",
+        name="locomotion_analyzer_node",
+        # prefix=["xterm -e gdb -ex run --args"],
+        remappings=[
+            ("agv_curr_pose", "pose"),
+            ("agv_map", "map_cloud"),
+            ("agv_odom", "episode_gnss_odom"),
         ],
         output="screen",
     )
 
     ld = LaunchDescription()
     ld.add_action(ros2bag_analyzer)
+    ld.add_action(locomotion_analyzer)
 
     return ld
