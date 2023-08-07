@@ -133,6 +133,8 @@ public:
   void optimizeSubmapGraph(std::vector<Eigen::Matrix4f>& refined_transforms);
 
 private:
+  geometry_msgs::msg::PoseStamped current_pose_;
+
   std::mutex mutex_;
 
   // tf buffer to get access to transfroms
@@ -145,7 +147,9 @@ private:
 
   vox_nav_slam_msgs::msg::MapArray::SharedPtr map_array_msg_;
   rclcpp::Subscription<vox_nav_slam_msgs::msg::MapArray>::SharedPtr map_array_sub_;
+
   rclcpp::Publisher<vox_nav_slam_msgs::msg::MapArray>::SharedPtr modified_map_array_pub_;
+
   rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr modified_path_pub_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr modified_map_pub_;
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr icp_uncertainty_marker_pub_;
@@ -158,6 +162,8 @@ private:
 
   bool initial_map_array_received_{ false };
   bool is_map_array_updated_{ false };
+
+  Eigen::Matrix4f previous_odom_mat_{ Eigen::Matrix4f::Identity() };
 };
 }  // namespace graphslam
 

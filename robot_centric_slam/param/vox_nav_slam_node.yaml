@@ -6,12 +6,12 @@ vox_nav_slam_node:
     z_bound: 5.0
     downsample_voxel_size: 0.2
     map_voxel_size: 0.2
-    max_icp_iter: 30
-    max_correspondence_distance: 1.0
+    max_icp_iter: 100
+    max_correspondence_distance: 5.0
     method : 'VGICP' # OTHER OPTIONS' GICP, VGICP, VGICP_CUDA, NDT_CUDA
-    num_threads: 1
+    num_threads: 4
     max_num_targeted_clouds: 20
     min_dist_to_update_map: 0.8
     publish_tf: True
-    num_adjacent_pose_constraints: 4
+    num_adjacent_pose_constraints: 2
     debug: True

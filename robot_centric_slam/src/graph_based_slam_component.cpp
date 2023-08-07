@@ -102,6 +102,12 @@ void GraphBasedSlamComponent::mapArrayCallback(const vox_nav_slam_msgs::msg::Map
 {
   std::lock_guard<std::mutex> lock(mutex_);
   map_array_msg_ = std::make_shared<vox_nav_slam_msgs::msg::MapArray>(*msg_ptr);
+
+  if (!initial_map_array_received_ && map_array_msg_->submaps.size() > 0)
+  {
+    current_pose_.pose = map_array_msg_->submaps.back().odometry.pose.pose;
+  }
+
   initial_map_array_received_ = true;
   is_map_array_updated_ = true;
 
@@ -144,15 +150,26 @@ void GraphBasedSlamComponent::icpThread()
   // Publish modified map
   sensor_msgs::msg::PointCloud2 modified_map;
   pcl::PointCloud<pcl::PointXYZI>::Ptr modified_map_ptr(new pcl::PointCloud<pcl::PointXYZI>());
-  for (int i = icp_params_.num_adjacent_pose_constraints; i < map_array_msg_->submaps.size(); i++)
+  int num_submaps = map_array_msg_->submaps.size();
+  for (int i = 0; i < icp_params_.max_num_targeted_clouds - 1; i++)
   {
+    if (num_submaps - 1 - i < 0)
+    {
+      continue;
+    }
+
     pcl::PointCloud<pcl::PointXYZI>::Ptr tmp_ptr(new pcl::PointCloud<pcl::PointXYZI>());
-    pcl::fromROSMsg(map_array_msg_->submaps[i].cloud, *tmp_ptr);
+    pcl::fromROSMsg(map_array_msg_->submaps[num_submaps - 1 - i].cloud, *tmp_ptr);
     pcl::PointCloud<pcl::PointXYZI>::Ptr transformed_tmp_ptr(new pcl::PointCloud<pcl::PointXYZI>());
     Eigen::Affine3d submap_affine;
-    tf2::fromMsg(map_array_msg_->submaps[i].pose, submap_affine);
+    tf2::fromMsg(map_array_msg_->submaps[num_submaps - 1 - i].pose, submap_affine);
     pcl::transformPointCloud(*tmp_ptr, *transformed_tmp_ptr, submap_affine.matrix());
     *modified_map_ptr += *transformed_tmp_ptr;
+
+    if (transformed_tmp_ptr->size() == 0)
+    {
+      RCLCPP_WARN(get_logger(), "Submap %d is empty", num_submaps - 1 - i);
+    }
   }
   pcl::toROSMsg(*modified_map_ptr, modified_map);
   modified_map.header = map_array_msg_->header;
@@ -161,138 +178,62 @@ void GraphBasedSlamComponent::icpThread()
 
 void GraphBasedSlamComponent::optimizeSubmapGraph(std::vector<Eigen::Matrix4f>& refined_transforms)
 {
-  // report the cycle time
   auto start = std::chrono::high_resolution_clock::now();
 
-  // Optimize submaps
-  // The accumulated submaps shall be greater than num_adjacent_pose_constraints
-  // Publish spheres/ellipses to indicate uncertainty
-  visualization_msgs::msg::MarkerArray marker_array;
-  for (int i = icp_params_.num_adjacent_pose_constraints; i < map_array_msg_->submaps.size(); i++)
+  if (map_array_msg_->submaps.size() <= 1)
   {
-    Eigen::Affine3d curr_ith_cloud_transform;
-    tf2::fromMsg(map_array_msg_->submaps[i].odometry.pose.pose, curr_ith_cloud_transform);
-    pcl::PointCloud<pcl::PointXYZI>::Ptr curr_ith_cloud(new pcl::PointCloud<pcl::PointXYZI>);
-    pcl::fromROSMsg(map_array_msg_->submaps[i].cloud, *curr_ith_cloud);
-    pcl::transformPointCloud(*curr_ith_cloud, *curr_ith_cloud, curr_ith_cloud_transform.matrix().cast<float>());
-    // Set source pointcloud
-    registration_->setInputSource(curr_ith_cloud);
+    return;
+  }
 
-    Eigen::Vector3d odom_position = curr_ith_cloud_transform.matrix().block<3, 1>(0, 3);
-    Eigen::Matrix3d odom_rot_mat = curr_ith_cloud_transform.matrix().block<3, 3>(0, 0);
-    Eigen::Vector3d odom_rpy = odom_rot_mat.cast<double>().eulerAngles(0, 1, 2);
-    Eigen::VectorXd odom_vec_joined(odom_position.size() + odom_rpy.size());
-    odom_vec_joined << odom_position, odom_rpy;
+  visualization_msgs::msg::MarkerArray marker_array;
 
-    // From a given submap, find the previous submaps (num_adjacent_pose_constraints) to be used for ICP
-    // This process is done continuously
-    std::vector<Eigen::VectorXd> icp_measurements_vec;
-    std::vector<Eigen::Matrix4f> icp_measurements_mat;
+  for (int i = 1; i < map_array_msg_->submaps.size(); i++)
+  {
+    pcl::PointCloud<pcl::PointXYZI>::Ptr source_cloud(new pcl::PointCloud<pcl::PointXYZI>);
+    pcl::fromROSMsg(map_array_msg_->submaps[i].cloud, *source_cloud);
+    Eigen::Affine3d current_pose_homogenous = Eigen::Affine3d::Identity();
+    tf2::fromMsg(map_array_msg_->submaps[i].odometry.pose.pose, current_pose_homogenous);
+    registration_->setInputSource(source_cloud);
 
-    double min_icp_cost = std::numeric_limits<double>::max();
-    int min_icp_cost_index = -1;
-    int counter = 0;
+    pcl::PointCloud<pcl::PointXYZI>::Ptr target_cloud(new pcl::PointCloud<pcl::PointXYZI>);
+    pcl::fromROSMsg(map_array_msg_->submaps.front().cloud, *target_cloud);
+    Eigen::Affine3d prev_pose_homogenous = Eigen::Affine3d::Identity();
+    registration_->setInputTarget(target_cloud);
 
-    for (int j = i - icp_params_.num_adjacent_pose_constraints; j < i; j++)
-    {
-      Eigen::Affine3d prev_jth_transform;
-      tf2::fromMsg(map_array_msg_->submaps[j].odometry.pose.pose, prev_jth_transform);
+    // Calculate relative transform between current odom and previous odom
+    Eigen::Affine3d curr_odom = Eigen::Affine3d::Identity();
+    Eigen::Affine3d init_odom = Eigen::Affine3d::Identity();
 
-      pcl::PointCloud<pcl::PointXYZI>::Ptr prev_jth_cloud(new pcl::PointCloud<pcl::PointXYZI>);
-      pcl::fromROSMsg(map_array_msg_->submaps[j].cloud, *prev_jth_cloud);
-      pcl::transformPointCloud(*prev_jth_cloud, *prev_jth_cloud, prev_jth_transform.matrix().cast<float>());
+    tf2::fromMsg(map_array_msg_->submaps[i].odometry.pose.pose, curr_odom);
+    tf2::fromMsg(map_array_msg_->submaps.front().odometry.pose.pose, init_odom);
 
-      // Set target pointcloud
-      registration_->setInputTarget(prev_jth_cloud);
+    auto odom_diff = (init_odom.inverse() * curr_odom).matrix().cast<float>();
+    auto sim_trans = curr_odom.matrix().cast<float>() * odom_diff;
 
-      pcl::PointCloud<pcl::PointXYZI>::Ptr output_cloud(new pcl::PointCloud<pcl::PointXYZI>);
+    pcl::PointCloud<pcl::PointXYZI>::Ptr output_cloud(new pcl::PointCloud<pcl::PointXYZI>);
 
-      registration_->align(*output_cloud, curr_ith_cloud_transform.matrix().cast<float>());
-      Eigen::Matrix4f final_transformation = registration_->getFinalTransformation();
+    registration_->align(*output_cloud, curr_odom.matrix().cast<float>());
+    Eigen::Matrix4f final_transformation = registration_->getFinalTransformation();
 
-      Eigen::Vector3d icp_position = final_transformation.block<3, 1>(0, 3).cast<double>();
-      Eigen::Matrix3d icp_rot_mat = final_transformation.block<3, 3>(0, 0).cast<double>();
-      Eigen::Vector3d icp_rpy = icp_rot_mat.eulerAngles(0, 1, 2);
+    auto best_icp_measurement = final_transformation;
 
-      Eigen::VectorXd icp_vec_joined(icp_position.size() + icp_rpy.size());
-      icp_vec_joined << icp_position, icp_rpy;
+    // update the current pose with the best icp measurement
+    Eigen::Affine3d best_icp_measurement_homogenous = Eigen::Affine3d::Identity();
+    best_icp_measurement_homogenous.matrix() = best_icp_measurement.cast<double>();
 
-      icp_measurements_vec.push_back(icp_vec_joined);
-      icp_measurements_mat.push_back(final_transformation);
-
-      min_icp_cost = std::min(min_icp_cost, registration_->getFitnessScore());
-      if (min_icp_cost == registration_->getFitnessScore())
-      {
-        min_icp_cost_index = counter;
-      }
-      counter++;
-    }
-
-    icp_measurements_vec.push_back(odom_vec_joined);
-
-    Eigen::VectorXd mean = Eigen::VectorXd::Zero(icp_measurements_vec[0].size());
-    for (int m = 0; m < icp_measurements_vec.size(); m++)
-    {
-      mean += icp_measurements_vec[m];
-    }
-    mean /= icp_measurements_vec.size();
-
-    Eigen::MatrixXd covariance = Eigen::MatrixXd::Zero(icp_measurements_vec[0].size(), icp_measurements_vec[0].size());
-    for (int m = 0; m < icp_measurements_vec.size(); m++)
-    {
-      covariance += (icp_measurements_vec[m] - mean) * (icp_measurements_vec[m] - mean).transpose();
-    }
-    covariance /= icp_measurements_vec.size();
-
-    // print the covariance matrix
-    if (icp_params_.debug)
-    {
-      RCLCPP_INFO_STREAM(get_logger(), "Covariance matrix:  \n" << covariance);
-    }
-
-    auto best_icp_measurement = icp_measurements_mat[min_icp_cost_index];
-
-    // Publish some visualizations to rviz
-    Eigen::Vector3f position = best_icp_measurement.block<3, 1>(0, 3).cast<float>();
-    Eigen::Matrix3f rot_mat = best_icp_measurement.block<3, 3>(0, 0).cast<float>();
-    Eigen::Quaternionf quat_eig(rot_mat);
-    geometry_msgs::msg::Quaternion quat_msg = tf2::toMsg(quat_eig.cast<double>());
+    // update pose in map array
+    map_array_msg_->submaps[i].pose = tf2::toMsg(current_pose_homogenous);
+    // update odom in map array
 
     Eigen::Matrix4f transform = Eigen::Matrix4f::Identity();
-    transform.block<3, 3>(0, 0) = rot_mat;
-    transform.block<3, 1>(0, 3) = position;
+    transform.block<3, 3>(0, 0) = current_pose_homogenous.matrix().block<3, 3>(0, 0).cast<float>();
+    transform.block<3, 1>(0, 3) = current_pose_homogenous.matrix().block<3, 1>(0, 3).cast<float>();
     refined_transforms.push_back(transform);
 
-    map_array_msg_->submaps[i].pose.position.x = position(0);
-    map_array_msg_->submaps[i].pose.position.y = position(1);
-    map_array_msg_->submaps[i].pose.position.z = position(2);
-    map_array_msg_->submaps[i].pose.orientation = quat_msg;
-    map_array_msg_->submaps[i].odometry.pose.covariance[0] = std::max(10.0 * covariance(0, 0), 0.05);
-    map_array_msg_->submaps[i].odometry.pose.covariance[7] = std::max(10.0 * covariance(1, 1), 0.05);
-    map_array_msg_->submaps[i].odometry.pose.covariance[14] = std::max(10.0 * covariance(2, 2), 0.05);
-    map_array_msg_->submaps[i].odometry.pose.covariance[21] = std::max(10.0 * covariance(3, 3), 0.05);
-    map_array_msg_->submaps[i].odometry.pose.covariance[28] = std::max(10.0 * covariance(4, 4), 0.05);
-    map_array_msg_->submaps[i].odometry.pose.covariance[35] = std::max(10.0 * covariance(5, 5), 0.05);
-
-    visualization_msgs::msg::Marker marker;
-
-    // Publish uncertainty marker
-    marker.header = map_array_msg_->header;
-    marker.ns = "icp_uncertainty";
-    marker.id = i;
-    marker.type = visualization_msgs::msg::Marker::SPHERE;
-    marker.action = visualization_msgs::msg::Marker::ADD;
-    marker.pose = map_array_msg_->submaps[i].pose;
-    marker.scale.x = std::max(10.0 * covariance(0, 0), 0.05);
-    marker.scale.y = std::max(10.0 * covariance(1, 1), 0.05);
-    marker.scale.z = std::max(10.0 * covariance(2, 2), 0.05);
-    marker.color.a = 0.5;
-    marker.color.r = 0.0;
-    marker.color.g = 0.0;
-    marker.color.b = 1.0;
-    marker_array.markers.push_back(marker);
+    // Print the transformation between the two clouds
+    std::cout << "Transformation between submap " << i << " and submap 0" << std::endl;
+    std::cout << best_icp_measurement << std::endl;
   }
-  icp_uncertainty_marker_pub_->publish(marker_array);
 
   auto end = std::chrono::high_resolution_clock::now();
   std::chrono::duration<double> elapsed = end - start;
