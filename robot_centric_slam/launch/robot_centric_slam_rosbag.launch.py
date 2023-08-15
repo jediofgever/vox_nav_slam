@@ -26,7 +26,7 @@ def generate_launch_description():
         parameters=[params],
         remappings=[
             ("/cloud_in", "/episode_cloud"),
-            ("/odom_in", "/episode_gnss_odom"),
+            ("/odom_in", "/episode_odom"),
         ],
         output="screen",
     )

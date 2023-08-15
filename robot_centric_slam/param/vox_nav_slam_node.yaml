@@ -12,6 +12,6 @@ vox_nav_slam_node:
     num_threads: 4
     max_num_targeted_clouds: 20
     min_dist_to_update_map: 0.8
-    publish_tf: True
+    publish_tf: False
     num_adjacent_pose_constraints: 2
     debug: True

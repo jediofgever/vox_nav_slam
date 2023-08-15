@@ -215,24 +215,21 @@ void GraphBasedSlamComponent::optimizeSubmapGraph(std::vector<Eigen::Matrix4f>& 
     registration_->align(*output_cloud, curr_odom.matrix().cast<float>());
     Eigen::Matrix4f final_transformation = registration_->getFinalTransformation();
 
-    auto best_icp_measurement = final_transformation;
+    // Publish some visualizations to rviz
+    Eigen::Vector3f position = final_transformation.block<3, 1>(0, 3).cast<float>();
+    Eigen::Matrix3f rot_mat = final_transformation.block<3, 3>(0, 0).cast<float>();
+    Eigen::Quaternionf quat_eig(rot_mat);
+    geometry_msgs::msg::Quaternion quat_msg = tf2::toMsg(quat_eig.cast<double>());
+    map_array_msg_->submaps[i].pose.position.x = position.x();
+    map_array_msg_->submaps[i].pose.position.y = position.y();
+    map_array_msg_->submaps[i].pose.position.z = position.z();
+    map_array_msg_->submaps[i].pose.orientation = quat_msg;
 
-    // update the current pose with the best icp measurement
-    Eigen::Affine3d best_icp_measurement_homogenous = Eigen::Affine3d::Identity();
-    best_icp_measurement_homogenous.matrix() = best_icp_measurement.cast<double>();
-
-    // update pose in map array
-    map_array_msg_->submaps[i].pose = tf2::toMsg(current_pose_homogenous);
-    // update odom in map array
-
-    Eigen::Matrix4f transform = Eigen::Matrix4f::Identity();
-    transform.block<3, 3>(0, 0) = current_pose_homogenous.matrix().block<3, 3>(0, 0).cast<float>();
-    transform.block<3, 1>(0, 3) = current_pose_homogenous.matrix().block<3, 1>(0, 3).cast<float>();
-    refined_transforms.push_back(transform);
+    refined_transforms.push_back(final_transformation);
 
     // Print the transformation between the two clouds
     std::cout << "Transformation between submap " << i << " and submap 0" << std::endl;
-    std::cout << best_icp_measurement << std::endl;
+    std::cout << final_transformation << std::endl;
   }
 
   auto end = std::chrono::high_resolution_clock::now();
