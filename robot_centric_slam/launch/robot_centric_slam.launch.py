@@ -26,8 +26,8 @@ def generate_launch_description():
         parameters=[params],
         remappings=[
             ("/cloud_in", "/AGV0/dobbie/sensing/lidar/top/pointcloud_raw_ex"),
-            # ("/odom_in", "/odometry/global"),
-            ("/odom_in", "/AGV0/dobbie/odom"),
+            ("/odom_in", "/odometry/global"),
+            # ("/odom_in", "/AGV0/dobbie/odom"),
         ],
         output="screen",
     )

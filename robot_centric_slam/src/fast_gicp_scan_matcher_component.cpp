@@ -185,7 +185,7 @@ void FastGICPScanMatcher::cloudCallback(const sensor_msgs::msg::PointCloud2::Con
   crop_box_filter.setMax(Eigen::Vector4f(icp_params_.x_bound, icp_params_.y_bound, icp_params_.z_bound, 1.0));
   crop_box_filter.filter(*cloud_pcl);
 
-  performRegistration(cloud_pcl);
+  performRegistration(cloud_pcl, cloud->header);
 }
 
 void FastGICPScanMatcher::initializeMap(const pcl::PointCloud<pcl::PointXYZI>::Ptr cloud,  // NOLINT
@@ -238,7 +238,8 @@ void FastGICPScanMatcher::initializeMap(const pcl::PointCloud<pcl::PointXYZI>::P
   map_cloud_pub_->publish(submap.cloud);
 }
 
-void FastGICPScanMatcher::performRegistration(const pcl::PointCloud<pcl::PointXYZI>::Ptr cloud)
+void FastGICPScanMatcher::performRegistration(const pcl::PointCloud<pcl::PointXYZI>::Ptr cloud,  // NOLINT
+                                              const std_msgs::msg::Header& header)
 {
   if (icp_future_->valid() && mapping_flag_)
   {
@@ -352,6 +353,12 @@ void FastGICPScanMatcher::performRegistration(const pcl::PointCloud<pcl::PointXY
   path_->header.frame_id = "map";
   path_pub_->publish(*path_);
 
+  sensor_msgs::msg::PointCloud2::SharedPtr map_msg_ptr(new sensor_msgs::msg::PointCloud2);
+  pcl::toROSMsg(*targeted_cloud_, *map_msg_ptr);
+  map_msg_ptr->header.frame_id = "map";
+  map_msg_ptr->header.stamp = header.stamp;
+  map_cloud_pub_->publish(*map_msg_ptr);
+
   // Publish tf
   if (icp_params_.publish_tf)
   {
@@ -374,7 +381,7 @@ void FastGICPScanMatcher::performRegistration(const pcl::PointCloud<pcl::PointXY
     current_pose_stamped = *current_pose_;
     previous_position_ = position;  // NOLINT
     icp_task_ = std::packaged_task<void()>(std::bind(&FastGICPScanMatcher::insertScantoMap, this, cloud,
-                                                     final_transformation, current_pose_stamped));  // NOLINT
+                                                     final_transformation, current_pose_stamped, header));  // NOLINT
     icp_future_ = std::make_shared<std::future<void>>(icp_task_.get_future());
     icp_thread_ = std::make_shared<std::thread>(std::move(std::ref(icp_task_)));
     mapping_flag_ = true;
@@ -405,7 +412,8 @@ void FastGICPScanMatcher::performRegistration(const pcl::PointCloud<pcl::PointXY
 
 void FastGICPScanMatcher::insertScantoMap(const pcl::PointCloud<pcl::PointXYZI>::Ptr cloud,
                                           const Eigen::Matrix4f& pose,  // NOLINT
-                                          const geometry_msgs::msg::PoseStamped& current_pose)
+                                          const geometry_msgs::msg::PoseStamped& current_pose,
+                                          const std_msgs::msg::Header& header)
 {
   // Downsample cloud according to the voxel size of the map
   pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_downsampled(new pcl::PointCloud<pcl::PointXYZI>());
@@ -476,12 +484,6 @@ void FastGICPScanMatcher::insertScantoMap(const pcl::PointCloud<pcl::PointXYZI>:
   sub_maps_pub_->publish(*sub_maps_);
 
   is_map_updated_ = true;
-
-  sensor_msgs::msg::PointCloud2::SharedPtr map_msg_ptr(new sensor_msgs::msg::PointCloud2);
-  pcl::toROSMsg(*targeted_cloud_, *map_msg_ptr);
-  map_msg_ptr->header.frame_id = "map";
-  map_msg_ptr->header.stamp = now();
-  map_cloud_pub_->publish(*map_msg_ptr);
 }
 
 pcl::Registration<pcl::PointXYZI, pcl::PointXYZI>::Ptr FastGICPScanMatcher::createRegistration(std::string method,

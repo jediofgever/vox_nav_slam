@@ -20,6 +20,7 @@
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <sensor_msgs/msg/imu.hpp>
 #include <std_msgs/msg/bool.hpp>
+#include <std_srvs/srv/set_bool.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <visualization_msgs/msg/marker.hpp>
 #include <visualization_msgs/msg/marker_array.hpp>
@@ -55,6 +56,12 @@ public:
   void currPoseCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg);
   void mapCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg);
   void odomCallback(const nav_msgs::msg::Odometry::SharedPtr msg);
+  void takeSnapshotNonTravCallback(const std::shared_ptr<rmw_request_id_t> request_header,
+                                   const std::shared_ptr<std_srvs::srv::SetBool::Request> request,
+                                   const std::shared_ptr<std_srvs::srv::SetBool::Response> response);
+  void takeSnapshotCallback(const std::shared_ptr<rmw_request_id_t> request_header,
+                            const std::shared_ptr<std_srvs::srv::SetBool::Request> request,
+                            const std::shared_ptr<std_srvs::srv::SetBool::Response> response);
 
 private:
   rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr curr_pose_subscriber_;
@@ -65,6 +72,10 @@ private:
 
   rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr marker_pub_;
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr marker_array_pub_;
+
+  // service server for taking a snapshot of point cloud
+  rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr take_snapshot_non_traversable_srv_;
+  rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr take_snapshot_traversable_srv_;
 
   pcl::PointCloud<pcl::PointXYZI>::Ptr targeted_cloud_;
   geometry_msgs::msg::PoseStamped curr_pose_;
@@ -77,7 +88,7 @@ private:
   std::queue<nav_msgs::msg::Odometry::SharedPtr> cmd_vel_buffer_;
 
   // Lat N seconds to consider
-  float time_frame_{ 3.0 };
+  float time_frame_{ 4.0 };
   // Mean nominal velocity in the last  N seconds
   float w1_{ 2.0 };
   float w2_{ 2.0 };
@@ -88,6 +99,9 @@ private:
 
   sensor_msgs::msg::Imu::SharedPtr imu_msg_;
   bool imu_received_{ false };
+
+  bool take_snapshot_non_traversable_{ false };
+  bool take_snapshot_traversable_{ false };
 };
 
 LocomotionAnalyzer::LocomotionAnalyzer() : Node("locomotion_analyzer")
@@ -154,7 +168,6 @@ LocomotionAnalyzer::LocomotionAnalyzer() : Node("locomotion_analyzer")
         mean_vel_x /= cmd_vel_buffer_.size();
         w1_ = std::abs(mean_vel_x);
         w2_ = std::abs(mean_vel_x);
-
       });
 
   // imu subscriber
@@ -172,8 +185,15 @@ LocomotionAnalyzer::LocomotionAnalyzer() : Node("locomotion_analyzer")
   marker_array_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(  // NOLINT
       "locomotion_error_marker_array", rclcpp::QoS(rclcpp::KeepLast(1)).reliable());
 
-  // TF listener
+  take_snapshot_non_traversable_srv_ = this->create_service<std_srvs::srv::SetBool>(
+      "take_snapshot_non_traversable", std::bind(&LocomotionAnalyzer::takeSnapshotNonTravCallback, this,
+                                                 std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
 
+  take_snapshot_traversable_srv_ = this->create_service<std_srvs::srv::SetBool>(
+      "take_snapshot_traversable", std::bind(&LocomotionAnalyzer::takeSnapshotCallback, this, std::placeholders::_1,
+                                             std::placeholders::_2, std::placeholders::_3));
+
+  // TF listener
   tf_buffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
   tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
 }
@@ -182,11 +202,32 @@ LocomotionAnalyzer::~LocomotionAnalyzer()
 {
 }
 
+void LocomotionAnalyzer::takeSnapshotCallback(const std::shared_ptr<rmw_request_id_t> request_header,
+                                              const std::shared_ptr<std_srvs::srv::SetBool::Request> request,
+                                              const std::shared_ptr<std_srvs::srv::SetBool::Response> response)
+{
+  (void)request_header;
+  (void)request;
+  (void)response;
+  take_snapshot_traversable_ = true;
+}
+
+void LocomotionAnalyzer::takeSnapshotNonTravCallback(const std::shared_ptr<rmw_request_id_t> request_header,
+                                                     const std::shared_ptr<std_srvs::srv::SetBool::Request> request,
+                                                     const std::shared_ptr<std_srvs::srv::SetBool::Response> response)
+{
+  (void)request_header;
+  (void)request;
+  (void)response;
+
+  take_snapshot_non_traversable_ = true;
+}
+
 void LocomotionAnalyzer::odomCallback(const nav_msgs::msg::Odometry::SharedPtr msg)
 {
   // RCLCPP_INFO(this->get_logger(), "Received odometry message with timestamp %i.", msg->header.stamp.sec);
 
-  auto r = 0.135;
+  auto wheel_diameter = 0.185;
 
   // push this odom to the queue
   odom_buffer_.push(std::make_shared<nav_msgs::msg::Odometry>(*msg));
@@ -208,9 +249,10 @@ void LocomotionAnalyzer::odomCallback(const nav_msgs::msg::Odometry::SharedPtr m
 
   // Calculate Locomotion error based on the odom buffer
   // use ((r * w1) + (r * w2)) / 2 to calculate the distance traveled
-  // r = wheel radius, w1 = angular velocity of left wheel, w2 = angular velocity of right wheel
-  auto distance = ((r * w1_) + (r * w2_)) / 2;
+  // r = wheel diameter, w1 = angular velocity of left wheel, w2 = angular velocity of right wheel
+  auto distance = ((wheel_diameter * w1_) + (wheel_diameter * w2_)) / 2;
   auto nominal_distance = distance * time_frame_;  // multiply by time_frame to get the distance traveled in 4 seconds
+  nominal_distance = std::abs(nominal_distance);
 
   // calculate actual distance traveled
   auto odom1 = odom_buffer_.front();
@@ -263,31 +305,6 @@ void LocomotionAnalyzer::odomCallback(const nav_msgs::msg::Odometry::SharedPtr m
   sphere_marker.scale.z = 0.5;
   sphere_marker.scale.x = 0.5;
   sphere_marker.scale.y = 0.5;
-  // color based on locomotion error
-  if (locomotion_error < 0.1)
-  {
-    // Green color
-    sphere_marker.color.a = 1.0;
-    sphere_marker.color.r = 0.0;
-    sphere_marker.color.g = 1.0;
-    sphere_marker.color.b = 0.0;
-  }
-  else if (locomotion_error < 0.2)
-  {
-    // Yellow color
-    sphere_marker.color.a = 1.0;
-    sphere_marker.color.r = 1.0;
-    sphere_marker.color.g = 1.0;
-    sphere_marker.color.b = 0.0;
-  }
-  else
-  {
-    // Red color
-    sphere_marker.color.a = 1.0;
-    sphere_marker.color.r = 1.0;
-    sphere_marker.color.g = 0.0;
-    sphere_marker.color.b = 0.0;
-  }
 
   // crop the map around the base_link and save it to disk together with locomotion error
   // Transform the map to base_link frame
@@ -297,8 +314,49 @@ void LocomotionAnalyzer::odomCallback(const nav_msgs::msg::Odometry::SharedPtr m
     auto y_dist = last_map_save_pose_->pose.position.y - curr_pose_.pose.position.y;
     auto dist = std::sqrt(std::pow(x_dist, 2) + std::pow(y_dist, 2));
 
-    if (dist > 0.5)
+    if (take_snapshot_non_traversable_ || take_snapshot_traversable_)
     {
+      if (take_snapshot_non_traversable_)
+      {
+        // Manual snapshots are taken when the robot is stuck, the locomotion error is set to 1.0
+        RCLCPP_INFO(get_logger(), "Taking a snapshot non traversable area");
+        current_locomotion_error_ = 1.0;
+        locomotion_error = 1.0;
+      }
+      else
+      {
+        RCLCPP_INFO(get_logger(), "Taking a snapshot of traversable area");
+        current_locomotion_error_ = 0.0;
+        locomotion_error = 0.0;
+      }
+      take_snapshot_non_traversable_ = false;
+      take_snapshot_traversable_ = false;
+
+      // color based on locomotion error
+      if (locomotion_error < 0.1)
+      {
+        // Green color
+        sphere_marker.color.a = 1.0;
+        sphere_marker.color.r = 0.0;
+        sphere_marker.color.g = 1.0;
+        sphere_marker.color.b = 0.0;
+      }
+      else if (locomotion_error < 0.2)
+      {
+        // Yellow color
+        sphere_marker.color.a = 1.0;
+        sphere_marker.color.r = 1.0;
+        sphere_marker.color.g = 1.0;
+        sphere_marker.color.b = 0.0;
+      }
+      else
+      {
+        // Red color
+        sphere_marker.color.a = 1.0;
+        sphere_marker.color.r = 1.0;
+        sphere_marker.color.g = 0.0;
+        sphere_marker.color.b = 0.0;
+      }
       // crop the map to the ROI with crop box filter around current pose
       pcl::CropBox<pcl::PointXYZI> crop_box_filter;
 
@@ -320,12 +378,12 @@ void LocomotionAnalyzer::odomCallback(const nav_msgs::msg::Odometry::SharedPtr m
       // transform the map to base_link frame
       pcl_ros::transformPointCloud(*targeted_cloud_, *transformed_cloud_ptr, transformStamped);
 
-      Eigen::Vector4f min_point(-0.5, -0.5, -2.5, 1.0);
-      Eigen::Vector4f max_point(+2.0, +0.5, +2.5, 1.0);
+      Eigen::Vector4f min_point(-1.0, -0.5, -2.5, 1.0);
+      Eigen::Vector4f max_point(+1.0, +0.5, +2.5, 1.0);
       crop_box_filter.setInputCloud(transformed_cloud_ptr);
       crop_box_filter.setMin(min_point);
       crop_box_filter.setMax(max_point);
-      crop_box_filter.setNegative(true);
+      crop_box_filter.setNegative(false);
       crop_box_filter.filter(*transformed_cloud_ptr);
 
       if (transformed_cloud_ptr->points.size() < 10)

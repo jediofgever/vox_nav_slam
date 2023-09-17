@@ -114,11 +114,13 @@ public:
   pcl::Registration<pcl::PointXYZI, pcl::PointXYZI>::Ptr createRegistration(std::string method, int num_threads,
                                                                             double voxel_resolution = 0.2);
 
-  void performRegistration(const pcl::PointCloud<pcl::PointXYZI>::Ptr cloud);
+  void performRegistration(const pcl::PointCloud<pcl::PointXYZI>::Ptr cloud,  // NOLINT
+                           const std_msgs::msg::Header& header);
 
   void insertScantoMap(const pcl::PointCloud<pcl::PointXYZI>::Ptr cloud,
-                       const Eigen::Matrix4f& pose,  // NOLINT
-                       const geometry_msgs::msg::PoseStamped& current_pose);
+                       const Eigen::Matrix4f& pose,                          // NOLINT
+                       const geometry_msgs::msg::PoseStamped& current_pose,  // NOLINT
+                       const std_msgs::msg::Header& header);
 
 private:
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr cloud_subscriber_;
