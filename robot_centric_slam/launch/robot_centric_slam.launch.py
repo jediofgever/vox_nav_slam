@@ -1,6 +1,6 @@
 from launch import LaunchDescription
 from launch_ros.actions import Node
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, Command
 from launch.actions import GroupAction
 from launch.actions import DeclareLaunchArgument
 from ament_index_python.packages import get_package_share_directory
@@ -9,6 +9,8 @@ import os
 
 def generate_launch_description():
     share_dir = get_package_share_directory("robot_centric_slam")
+
+    xacro_path = os.path.join(share_dir, "param", "robot_sim.urdf.xacro")
 
     params = LaunchConfiguration("params")
 
@@ -26,10 +28,38 @@ def generate_launch_description():
         parameters=[params],
         remappings=[
             ("/cloud_in", "/AGV0/dobbie/sensing/lidar/top/pointcloud_raw_ex"),
-            ("/odom_in", "/odometry/global"),
-            # ("/odom_in", "/AGV0/dobbie/odom"),
+            # ("/odom_in", "/odometry/global"),
+            ("/odom_in", "/AGV0/dobbie/odom"),
         ],
         output="screen",
+    )
+
+    tf = (
+        Node(
+            package="tf2_ros",
+            executable="static_transform_publisher",
+            arguments="0.0 0.0 0.0 0.0 0.0 0.0 map odom".split(" "),
+            output="screen",
+            parameters=[
+                {
+                    "use_sim_time": True,
+                }
+            ],
+        ),
+    )
+    rsp = (
+        Node(
+            package="robot_state_publisher",
+            executable="robot_state_publisher",
+            name="robot_state_publisher",
+            output="screen",
+            parameters=[
+                {
+                    "robot_description": Command(["xacro", " ", xacro_path]),
+                    "use_sim_time": True,
+                }
+            ],
+        ),
     )
 
     ld = LaunchDescription()

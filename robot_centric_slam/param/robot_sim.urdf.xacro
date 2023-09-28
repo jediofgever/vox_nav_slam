@@ -1,0 +1,36 @@
+<?xml version="1.0"?>
+<robot name="lio"
+  xmlns:xacro="http://tixiaoshan.github.io/">
+  <xacro:property name="PI" value="3.1415926535897931" />
+
+  <link name="base_link"></link>
+  <link name="sensor_kit_base_link"></link>
+  <link name="imu_link"></link>
+  <link name="os_sensor"></link>
+  <link name="camera_optical_link"></link>
+
+  <joint name="sensor_kit_base_link_joint" type="fixed">
+    <parent link="base_link" />
+    <child link="sensor_kit_base_link" />
+    <origin xyz="0.0 0 0.6" rpy="0 0 0" />
+  </joint>
+
+  <joint name="imu_joint" type="fixed">
+    <parent link="sensor_kit_base_link" />
+    <child link="imu_link" />
+    <origin xyz="0.0 0.0 0.0" rpy="0 0 0" />
+  </joint>
+
+  <joint name="os_joint" type="fixed">
+    <parent link="sensor_kit_base_link" />
+    <child link="os_sensor" />
+    <origin xyz="0.0 0.0 0.0" rpy="0 0 0" />
+  </joint>
+
+  <joint name="camera_joint" type="fixed">
+    <parent link="sensor_kit_base_link" />
+    <child link="camera_optical_link" />
+    <origin xyz="-0.15 0.0 0.0" rpy="0 0 0" />
+  </joint>
+
+</robot>

@@ -122,6 +122,12 @@ include_directories(include)
 target_link_libraries(locomotion_analyzer ${PCL_LIBRARIES})
 link_directories(${PCL_LIBRARY_DIRS})
 
+add_executable(imu_locomotion src/imu_locomotion.cpp)
+ament_target_dependencies(imu_locomotion ${dependencies})
+include_directories(include)
+target_link_libraries(imu_locomotion ${PCL_LIBRARIES})
+link_directories(${PCL_LIBRARY_DIRS})
+
 rclcpp_components_register_nodes(graph_based_slam_component 
   "graphslam::GraphBasedSlamComponent")
 rclcpp_components_register_nodes(fast_gicp_scan_matcher_component 
@@ -150,6 +156,7 @@ install(TARGETS
   vox_nav_slam_node
   ros2bag_analyzer
   locomotion_analyzer
+  imu_locomotion
   DESTINATION lib/${PROJECT_NAME})
 
 ament_export_include_directories(include)
