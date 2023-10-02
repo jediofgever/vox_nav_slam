@@ -224,7 +224,7 @@ void LocomotionAnalyzer::publishCovarianceMarkers(
   // Publish acc covariace with green ellipses use all 3 rows and columns of the acc_covariance matrix
   // RPY COVARINCE MARKER
   visualization_msgs::msg::Marker gyro_covariance_marker;
-  gyro_covariance_marker.header.frame_id = "map";
+  gyro_covariance_marker.header.frame_id = "odom";
   gyro_covariance_marker.header.stamp = this->now();
   gyro_covariance_marker.ns = "gyro_covariance";
   gyro_covariance_marker.id = locomotion_error_markers_.markers.size();
@@ -234,7 +234,7 @@ void LocomotionAnalyzer::publishCovarianceMarkers(
   gyro_covariance_marker.pose.position.x = pose.translation.x;
   gyro_covariance_marker.pose.position.y = pose.translation.y;
   gyro_covariance_marker.pose.position.z = pose.translation.z;
-  float min_val = 0.001;
+  float min_val = 0.01;
   float max_val = 1.0;
   gyro_covariance_marker.scale.x = clip(gyro_covariance(0, 0), min_val, max_val);
   gyro_covariance_marker.scale.y = clip(gyro_covariance(1, 1), min_val, max_val);
@@ -249,7 +249,7 @@ void LocomotionAnalyzer::publishCovarianceMarkers(
 
   // ACC COVARINCE MARKER
   visualization_msgs::msg::Marker acc_covariance_marker;
-  acc_covariance_marker.header.frame_id = "map";
+  acc_covariance_marker.header.frame_id = "odom";
   acc_covariance_marker.header.stamp = this->now();
   acc_covariance_marker.ns = "acc_covariance";
   acc_covariance_marker.id = locomotion_error_markers_.markers.size();
@@ -292,7 +292,7 @@ void LocomotionAnalyzer::takeSnapshotCallback(const std::shared_ptr<rmw_request_
   geometry_msgs::msg::TransformStamped transformStamped;
   try
   {
-    transformStamped = tf_buffer_->lookupTransform("base_link", "map", rclcpp::Time(0));
+    transformStamped = tf_buffer_->lookupTransform("base_link", "odom", rclcpp::Time(0));
   }
   catch (tf2::TransformException& ex)
   {
@@ -389,11 +389,11 @@ void LocomotionAnalyzer::imuCallback(const sensor_msgs::msg::Imu::SharedPtr msg)
 {
   // RCLCPP_INFO(this->get_logger(), "Received odometry message with timestamp %i.", msg->header.stamp.sec);
 
-  // get transform from map to base_link
+  // get transform from odom to base_link
   geometry_msgs::msg::TransformStamped transform_stamped;
   try
   {
-    transform_stamped = tf_buffer_->lookupTransform("base_link", "map", tf2::TimePointZero);
+    transform_stamped = tf_buffer_->lookupTransform("base_link", "odom", tf2::TimePointZero);
   }
   catch (tf2::TransformException& ex)
   {
@@ -424,11 +424,11 @@ void LocomotionAnalyzer::imuCallback(const sensor_msgs::msg::Imu::SharedPtr msg)
     imu_buffer_.erase(imu_buffer_.begin());
   }
 
-  // Get current pose in map frame from tf_buffer
+  // Get current pose in odom frame from tf_buffer
   geometry_msgs::msg::TransformStamped transform_stamped_map;
   try
   {
-    transform_stamped_map = tf_buffer_->lookupTransform("map", "base_link", tf2::TimePointZero);
+    transform_stamped_map = tf_buffer_->lookupTransform("odom", "base_link", tf2::TimePointZero);
   }
   catch (tf2::TransformException& ex)
   {

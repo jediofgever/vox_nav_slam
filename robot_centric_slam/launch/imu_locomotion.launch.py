@@ -25,7 +25,7 @@ def generate_launch_description():
                 "dist_threshold": 0.2,
             },
         ],
-        prefix=["xterm -e gdb -ex run --args"],
+        # prefix=["xterm -e gdb -ex run --args"],
     )
 
     ld = LaunchDescription()

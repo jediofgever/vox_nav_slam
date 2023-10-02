@@ -90,9 +90,7 @@ struct ICPParameters
 };
 
 /**
- * @brief Given a raw point cloud,
- * clusterize it and use UKF to track clusters. Publish vis of tracks in RVIZ
- * and publish vox_nav_msgs::msg::ObjectArray
+ * @brief Given a
  *
  */
 class FastGICPScanMatcher : public rclcpp::Node
@@ -106,8 +104,6 @@ public:
 
   void odomCallback(const nav_msgs::msg::Odometry::ConstSharedPtr odom);
 
-  void episodeEndCallback(const std_msgs::msg::Bool::ConstSharedPtr episode_end);
-
   void initializeMap(const pcl::PointCloud<pcl::PointXYZI>::Ptr cloud,  // NOLINT
                      const std_msgs::msg::Header& header);
 
@@ -118,14 +114,13 @@ public:
                            const std_msgs::msg::Header& header);
 
   void insertScantoMap(const pcl::PointCloud<pcl::PointXYZI>::Ptr cloud,
-                       const Eigen::Matrix4f& pose,                          // NOLINT
+                       const Eigen::Matrix4f& icp_estimate,                  // NOLINT
                        const geometry_msgs::msg::PoseStamped& current_pose,  // NOLINT
                        const std_msgs::msg::Header& header);
 
 private:
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr cloud_subscriber_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_subscriber_;
-  rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr episode_end_subscriber_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr map_cloud_pub_;
   rclcpp::Publisher<vox_nav_slam_msgs::msg::MapArray>::SharedPtr sub_maps_pub_;
   rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pose_pub_;

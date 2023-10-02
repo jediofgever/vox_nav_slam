@@ -96,8 +96,34 @@ extern "C" {
 #include <memory>
 #include <mutex>
 
+#include <cmath>
+#include <cstdlib>
+#include <limits>
+#include <vector>
+
 namespace graphslam
 {
+
+template <typename fp_type>
+fp_type minkowski_distance(const fp_type& p, const std::vector<fp_type>& ds)
+{
+  // ds contains d[i] = v[i] - w[i] for two vectors v and w
+  fp_type ex = 0.0;
+  fp_type min_d = std::numeric_limits<fp_type>::infinity();
+  fp_type max_d = -std::numeric_limits<fp_type>::infinity();
+  for (int i = 0; i < ds.size(); ++i)
+  {
+    fp_type d = std::fabs(ds[i]);
+    ex += std::pow(d, p);
+    min_d = std::min(min_d, d);
+    max_d = std::max(max_d, d);
+  }
+
+  return std::isnan(ex)                         ? ex :
+         !std::isnormal(ex) && std::signbit(p)  ? min_d :
+         !std::isnormal(ex) && !std::signbit(p) ? max_d :
+                                                  std::pow(ex, 1.0 / p);
+}
 
 struct ICPParameters
 {
@@ -132,6 +158,9 @@ public:
 
   void optimizeSubmapGraph(std::vector<Eigen::Matrix4f>& refined_transforms);
 
+  void
+  publishUncertaintyMarkers(const std::vector<std::pair<Eigen::Matrix4f, Eigen::Matrix4f>>& initial_guess_vs_refined);
+
 private:
   geometry_msgs::msg::PoseStamped current_pose_;
 
@@ -156,6 +185,8 @@ private:
 
   rclcpp::Publisher<geometry_msgs::msg::PoseArray>::SharedPtr icp_pose_array_pub_;
   rclcpp::Publisher<geometry_msgs::msg::PoseArray>::SharedPtr odom_pose_array_pub_;
+
+  std::shared_ptr<std::thread> icp_thread_;
 
   // ICP parameters
   ICPParameters icp_params_;

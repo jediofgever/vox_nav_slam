@@ -7,12 +7,13 @@
   <link name="sensor_kit_base_link"></link>
   <link name="imu_link"></link>
   <link name="os_sensor"></link>
+  <link name="camera_link"></link>
   <link name="camera_optical_link"></link>
 
   <joint name="sensor_kit_base_link_joint" type="fixed">
     <parent link="base_link" />
     <child link="sensor_kit_base_link" />
-    <origin xyz="0.0 0 0.6" rpy="0 0 0" />
+    <origin xyz="0.0 0 0.2" rpy="0 0 0" />
   </joint>
 
   <joint name="imu_joint" type="fixed">
@@ -29,8 +30,14 @@
 
   <joint name="camera_joint" type="fixed">
     <parent link="sensor_kit_base_link" />
-    <child link="camera_optical_link" />
+    <child link="camera_link" />
     <origin xyz="-0.15 0.0 0.0" rpy="0 0 0" />
+  </joint>
+
+  <joint name="camera_optical_joint" type="fixed">
+    <parent link="camera_link" />
+    <child link="camera_optical_link" />
+    <origin xyz="0.0 0.0 0.0" rpy="-1.57 0 -1.57" />
   </joint>
 
 </robot>
