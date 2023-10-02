@@ -1,7 +1,6 @@
-// Source: https://github.com/rsasaki0109/lidarslam_ros2
 
-#ifndef GS_GBS_COMPONENT_H_INCLUDED
-#define GS_GBS_COMPONENT_H_INCLUDED
+#ifndef VOX_NAV_SLAM___ROBOT_CENTRIC_SLAM__FAST_GICP_OPTIM_COMPONENT
+#define VOX_NAV_SLAM___ROBOT_CENTRIC_SLAM__FAST_GICP_OPTIM_COMPONENT
 
 #if __cplusplus
 extern "C" {
@@ -78,17 +77,6 @@ extern "C" {
 #include <vox_nav_slam_msgs/msg/map_array.hpp>
 #include <vox_nav_slam_msgs/msg/sub_map.hpp>
 
-#include <g2o/core/sparse_optimizer.h>
-#include <g2o/core/optimization_algorithm_levenberg.h>
-#include <g2o/core/block_solver.h>
-#include <g2o/solvers/eigen/linear_solver_eigen.h>
-#include <g2o/types/slam3d/vertex_se3.h>
-#include <g2o/types/slam3d/vertex_pointxyz.h>
-#include <g2o/types/slam3d/edge_se3.h>
-#include <g2o/types/slam3d/edge_se3_pointxyz.h>
-#include <g2o/types/slam3d/se3quat.h>
-#include <g2o/types/slam3d/parameter_se3_offset.h>
-
 #include <Eigen/Core>
 #include <queue>
 #include <vector>
@@ -101,7 +89,25 @@ extern "C" {
 #include <limits>
 #include <vector>
 
-namespace graphslam
+struct ICPParametersOptim
+{
+  float x_bound = 40.0;
+  float y_bound = 40.0;
+  float z_bound = 5.0;
+  float downsample_voxel_size = 0.2;
+  float map_voxel_size = 0.1;
+  int max_icp_iter = 30;
+  float max_correspondence_distance = 3.0;
+  std::string method{ "VGICP" };  //'VGICP' # OTHER OPTIONS' GICP, VGICP, VGICP_CUDA, NDT_CUDA
+  int num_threads = 4;
+  int max_num_targeted_clouds = 20;
+  float min_dist_to_update_map = 0.5;
+  bool publish_tf = true;
+  int num_adjacent_pose_constraints = 5;
+  bool debug = false;
+};
+
+namespace vox_nav_slam
 {
 
 template <typename fp_type>
@@ -125,29 +131,21 @@ fp_type minkowski_distance(const fp_type& p, const std::vector<fp_type>& ds)
                                                   std::pow(ex, 1.0 / p);
 }
 
-struct ICPParameters
-{
-  float x_bound = 40.0;
-  float y_bound = 40.0;
-  float z_bound = 5.0;
-  float downsample_voxel_size = 0.2;
-  float map_voxel_size = 0.1;
-  int max_icp_iter = 30;
-  float max_correspondence_distance = 3.0;
-  std::string method{ "VGICP" };  //'VGICP' # OTHER OPTIONS' GICP, VGICP, VGICP_CUDA, NDT_CUDA
-  int num_threads = 4;
-  int max_num_targeted_clouds = 20;
-  float min_dist_to_update_map = 0.5;
-  bool publish_tf = true;
-  int num_adjacent_pose_constraints = 5;
-  bool debug = false;
-};
-
-class GraphBasedSlamComponent : public rclcpp::Node
+class FastGICPOptimComponent : public rclcpp::Node
 {
 public:
+  /**
+   * @brief Construct a new Fast G I C P Optim Component object
+   *
+   * @param options
+   */
   GS_GBS_PUBLIC
-  explicit GraphBasedSlamComponent(const rclcpp::NodeOptions& options);
+  explicit FastGICPOptimComponent(const rclcpp::NodeOptions& options);
+
+  /**
+   * @brief Destroy the Fast G I C P Optim Component object
+   *
+   */
 
   void mapArrayCallback(const vox_nav_slam_msgs::msg::MapArray::ConstSharedPtr msg);
 
@@ -176,7 +174,6 @@ private:
 
   vox_nav_slam_msgs::msg::MapArray::SharedPtr map_array_msg_;
   rclcpp::Subscription<vox_nav_slam_msgs::msg::MapArray>::SharedPtr map_array_sub_;
-
   rclcpp::Publisher<vox_nav_slam_msgs::msg::MapArray>::SharedPtr modified_map_array_pub_;
 
   rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr modified_path_pub_;
@@ -189,13 +186,13 @@ private:
   std::shared_ptr<std::thread> icp_thread_;
 
   // ICP parameters
-  ICPParameters icp_params_;
+  ICPParametersOptim icp_params_;
 
   bool initial_map_array_received_{ false };
   bool is_map_array_updated_{ false };
 
   Eigen::Matrix4f previous_odom_mat_{ Eigen::Matrix4f::Identity() };
 };
-}  // namespace graphslam
+}  // namespace vox_nav_slam
 
-#endif  // GS_GBS_COMPONENT_H_INCLUDED
+#endif  // VOX_NAV_SLAM___ROBOT_CENTRIC_SLAM__FAST_GICP_OPTIM_COMPONENT

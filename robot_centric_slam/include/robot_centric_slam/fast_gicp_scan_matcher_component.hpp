@@ -61,9 +61,6 @@
 #include <memory>
 #include <mutex>
 
-namespace vox_nav_slam
-{
-
 struct ICPParameters
 {
   float x_bound = 40.0;
@@ -80,6 +77,9 @@ struct ICPParameters
   bool publish_tf = true;
   bool debug = false;
 };
+
+namespace vox_nav_slam
+{
 
 /**
  * @brief Keep last N scans, contiously perform ICP on last N scans, and update map

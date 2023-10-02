@@ -77,9 +77,9 @@ set(dependencies
     visualization_msgs
     vox_nav_slam_msgs)
 
-add_library(graph_based_slam_component SHARED src/graph_based_slam_component.cpp)
-ament_target_dependencies(graph_based_slam_component ${dependencies})
-target_compile_definitions(graph_based_slam_component PRIVATE "GS_GBS_BUILDING_DLL")
+add_library(fast_gicp_optim_component SHARED src/fast_gicp_optim_component.cpp)
+ament_target_dependencies(fast_gicp_optim_component ${dependencies})
+target_compile_definitions(fast_gicp_optim_component PRIVATE "GS_GBS_BUILDING_DLL")
 
 add_library(fast_gicp_scan_matcher_component SHARED src/fast_gicp_scan_matcher_component.cpp)
 ament_target_dependencies(fast_gicp_scan_matcher_component ${dependencies})
@@ -97,7 +97,7 @@ include_directories(
     ${fast_gicp_INCLUDE_DIRS}
 )
 target_link_libraries(vox_nav_slam_node
-                      graph_based_slam_component 
+                      fast_gicp_optim_component 
                       fast_gicp_scan_matcher_component
                       gtsam_component
                       ${PCL_LIBRARIES}
@@ -128,14 +128,14 @@ include_directories(include)
 target_link_libraries(imu_locomotion ${PCL_LIBRARIES})
 link_directories(${PCL_LIBRARY_DIRS})
 
-rclcpp_components_register_nodes(graph_based_slam_component 
+rclcpp_components_register_nodes(fast_gicp_optim_component 
   "graphslam::GraphBasedSlamComponent")
 rclcpp_components_register_nodes(fast_gicp_scan_matcher_component 
   "vox_nav_slam::FastGICPScanMatcher")
 rclcpp_components_register_nodes(gtsam_component 
   "vox_nav_slam::GTSAMComponent")
 
-ament_export_libraries(graph_based_slam_component)
+ament_export_libraries(fast_gicp_optim_component)
 ament_export_libraries(fast_gicp_scan_matcher_component)
 ament_export_libraries(gtsam_component)
 
@@ -146,7 +146,7 @@ install(
   DIRECTORY launch param
   DESTINATION share/${PROJECT_NAME})
 install(TARGETS
-  graph_based_slam_component
+fast_gicp_optim_component
   fast_gicp_scan_matcher_component
   gtsam_component
   ARCHIVE DESTINATION lib

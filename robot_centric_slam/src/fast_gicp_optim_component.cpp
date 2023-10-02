@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "robot_centric_slam/graph_based_slam_component.h"
+#include "robot_centric_slam/fast_gicp_optim_component.h"
 
-namespace graphslam
+namespace vox_nav_slam
 {
-GraphBasedSlamComponent::GraphBasedSlamComponent(const rclcpp::NodeOptions& options)
-  : rclcpp::Node("graph_slam_node", options)
+FastGICPOptimComponent::FastGICPOptimComponent(const rclcpp::NodeOptions& options)
+  : rclcpp::Node("fast_gicp_optim", options)
 {
   tf_buffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
   tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
@@ -65,7 +65,7 @@ GraphBasedSlamComponent::GraphBasedSlamComponent(const rclcpp::NodeOptions& opti
 
   map_array_sub_ = create_subscription<vox_nav_slam_msgs::msg::MapArray>(
       "sub_maps", rclcpp::QoS(rclcpp::KeepLast(1)).reliable(),
-      std::bind(&GraphBasedSlamComponent::mapArrayCallback, this, std::placeholders::_1));
+      std::bind(&FastGICPOptimComponent::mapArrayCallback, this, std::placeholders::_1));
   modified_map_pub_ = create_publisher<sensor_msgs::msg::PointCloud2>(  // NOLINT
       "modified_map", rclcpp::QoS(rclcpp::KeepLast(1)).reliable());
   modified_map_array_pub_ = create_publisher<vox_nav_slam_msgs::msg::MapArray>(  // NOLINT
@@ -80,8 +80,7 @@ GraphBasedSlamComponent::GraphBasedSlamComponent(const rclcpp::NodeOptions& opti
       "icp_uncertainty_marker", rclcpp::QoS(rclcpp::KeepLast(1)).reliable());
 
   // register the IcpThread
-
-  icp_thread_ = std::make_shared<std::thread>(std::thread(&GraphBasedSlamComponent::icpThread, this));
+  icp_thread_ = std::make_shared<std::thread>(std::thread(&FastGICPOptimComponent::icpThread, this));
 
   // Print parameters
   RCLCPP_INFO_STREAM(get_logger(), "x_bound: " << icp_params_.x_bound);
@@ -99,13 +98,13 @@ GraphBasedSlamComponent::GraphBasedSlamComponent(const rclcpp::NodeOptions& opti
   RCLCPP_INFO(get_logger(), "Creating...");
 }
 
-void GraphBasedSlamComponent::mapArrayCallback(const vox_nav_slam_msgs::msg::MapArray::ConstSharedPtr msg_ptr)
+void FastGICPOptimComponent::mapArrayCallback(const vox_nav_slam_msgs::msg::MapArray::ConstSharedPtr msg_ptr)
 {
   std::lock_guard<std::mutex> lock(mutex_);
   map_array_msg_ = std::make_shared<vox_nav_slam_msgs::msg::MapArray>(*msg_ptr);
 }
 
-void GraphBasedSlamComponent::icpThread()
+void FastGICPOptimComponent::icpThread()
 {
   while (rclcpp::ok())
   {
@@ -176,7 +175,7 @@ void GraphBasedSlamComponent::icpThread()
   }
 }
 
-void GraphBasedSlamComponent::optimizeSubmapGraph(std::vector<Eigen::Matrix4f>& refined_transforms)
+void FastGICPOptimComponent::optimizeSubmapGraph(std::vector<Eigen::Matrix4f>& refined_transforms)
 {
   auto start = std::chrono::high_resolution_clock::now();
 
@@ -253,7 +252,7 @@ void GraphBasedSlamComponent::optimizeSubmapGraph(std::vector<Eigen::Matrix4f>& 
   RCLCPP_INFO_STREAM(get_logger(), "Cycle time: " << elapsed.count());
 }
 
-void GraphBasedSlamComponent::publishUncertaintyMarkers(
+void FastGICPOptimComponent::publishUncertaintyMarkers(
     const std::vector<std::pair<Eigen::Matrix4f, Eigen::Matrix4f>>& initial_guess_vs_refined)
 {
   // Go through the initial guess vs refined transforms and publish uncertainty markers
@@ -316,9 +315,9 @@ void GraphBasedSlamComponent::publishUncertaintyMarkers(
 }
 
 pcl::Registration<pcl::PointXYZI, pcl::PointXYZI>::Ptr
-GraphBasedSlamComponent::createRegistration(std::string method,  // NOLINT
-                                            int num_threads,     // NOLINT
-                                            double voxel_resolution)
+FastGICPOptimComponent::createRegistration(std::string method,  // NOLINT
+                                           int num_threads,     // NOLINT
+                                           double voxel_resolution)
 {
   if (method == "GICP")
   {
@@ -352,7 +351,7 @@ GraphBasedSlamComponent::createRegistration(std::string method,  // NOLINT
   return nullptr;
 }
 
-}  // namespace graphslam
+}  // namespace vox_nav_slam
 
 #include <rclcpp_components/register_node_macro.hpp>
-RCLCPP_COMPONENTS_REGISTER_NODE(graphslam::GraphBasedSlamComponent)
+RCLCPP_COMPONENTS_REGISTER_NODE(vox_nav_slam::FastGICPOptimComponent)

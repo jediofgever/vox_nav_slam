@@ -212,10 +212,10 @@ void GTSAMComponent::doPoseAdjustment(vox_nav_slam_msgs::msg::MapArray& map_arra
 
   first_pose = first_pose * isam_pose;
 
-  path_msg_->header.frame_id = "map";
+  path_msg_->header.frame_id = "odom";
   path_msg_->header.stamp = now();
   geometry_msgs::msg::PoseStamped pose_stamped;
-  pose_stamped.header.frame_id = "map";
+  pose_stamped.header.frame_id = "odom";
   pose_stamped.header.stamp = now();
   pose_stamped.pose.position.x = first_pose.translation().x();
   pose_stamped.pose.position.y = first_pose.translation().y();

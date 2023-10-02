@@ -1,4 +1,4 @@
-#include "robot_centric_slam/graph_based_slam_component.h"
+#include "robot_centric_slam/fast_gicp_optim_component.h"
 #include "robot_centric_slam/fast_gicp_scan_matcher_component.hpp"
 #include "robot_centric_slam/gtsam_component.h"
 #include <rclcpp/rclcpp.hpp>
@@ -13,10 +13,10 @@ int main(int argc, char* argv[])
 
   auto scanmatcher = std::make_shared<vox_nav_slam::FastGICPScanMatcher>(options);
   exec.add_node(scanmatcher);
-  auto graphbasedslam = std::make_shared<graphslam::GraphBasedSlamComponent>(options);
-  exec.add_node(graphbasedslam);
-  //  auto gtsam = std::make_shared<vox_nav_slam::GTSAMComponent>(options);
-  //  exec.add_node(gtsam);
+  auto optim = std::make_shared<vox_nav_slam::FastGICPOptimComponent>(options);
+  exec.add_node(optim);
+  // auto gtsam = std::make_shared<vox_nav_slam::GTSAMComponent>(options);
+  // exec.add_node(gtsam);
 
   exec.spin();
   rclcpp::shutdown();
