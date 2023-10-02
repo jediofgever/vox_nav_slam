@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef VOX_NAV_SLAM__SCAN_MATCHER__FAST_GICP_CLIENT_HPP_
-#define VOX_NAV_SLAM__SCAN_MATCHER__FAST_GICP_CLIENT_HPP_
+#ifndef VOX_NAV_SLAM__FAST_GICP_SCAN_MATCHER_COMPONENT_HPP_
+#define VOX_NAV_SLAM__FAST_GICP_SCAN_MATCHER_COMPONENT_HPP_
 
 #include <pcl/PCLPointCloud2.h>
 #include <pcl/common/common.h>
@@ -51,14 +51,6 @@
 #include <fast_gicp/ndt/ndt_cuda.hpp>
 #include <fast_gicp/gicp/fast_vgicp_cuda.hpp>
 
-#include <gtsam_unstable/nonlinear/BatchFixedLagSmoother.h>
-#include <gtsam_unstable/nonlinear/IncrementalFixedLagSmoother.h>
-#include <gtsam/slam/BetweenFactor.h>
-#include <gtsam/nonlinear/NonlinearFactorGraph.h>
-#include <gtsam/nonlinear/Values.h>
-#include <gtsam/inference/Key.h>
-#include <gtsam/geometry/Pose3.h>
-
 #include <vox_nav_slam_msgs/msg/map_array.hpp>
 #include <vox_nav_slam_msgs/msg/sub_map.hpp>
 
@@ -90,61 +82,133 @@ struct ICPParameters
 };
 
 /**
- * @brief Given a
+ * @brief Keep last N scans, contiously perform ICP on last N scans, and update map
+ *        Also publish submaps for further optimization
  *
  */
 class FastGICPScanMatcher : public rclcpp::Node
 {
 public:
+  /**
+   * @brief Construct a new Fast G I C P Scan Matcher object
+   *
+   * @param options
+   */
   FastGICPScanMatcher(const rclcpp::NodeOptions& options);
 
+  /**
+   * @brief Destroy the Fast G I C P Scan Matcher object
+   *
+   */
   ~FastGICPScanMatcher();
 
+  /**
+   * @brief The callback function for the pointcloud subscriber, which is the main
+   *       entry point for the scan matching
+   *
+   * @param cloud
+   */
   void cloudCallback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr cloud);
 
+  /**
+   * @brief Additional odometry subscriber to get the current pose of the robot
+   *        This can be from a GPS, or a wheel odometry or a visual odometry
+   *        or any other odometry source. KISS-ICP is a really good odometry source.
+   *
+   * @param odom
+   */
   void odomCallback(const nav_msgs::msg::Odometry::ConstSharedPtr odom);
 
+  /**
+   * @brief For the first scan, we need to initialize the map, and this function
+   *
+   * @param cloud
+   * @param header
+   * @return * void
+   */
   void initializeMap(const pcl::PointCloud<pcl::PointXYZI>::Ptr cloud,  // NOLINT
                      const std_msgs::msg::Header& header);
 
+  /**
+   * @brief Create a Registration object
+   *        We use FASTGICP, which is a GPU accelerated ICP algorithm
+   *       We can also use other ICP algorithms, such as GICP, NDT, etc. Let the user choose
+   *
+   * @param method
+   * @param num_threads
+   * @param voxel_resolution
+   * @return pcl::Registration<pcl::PointXYZI, pcl::PointXYZI>::Ptr
+   */
   pcl::Registration<pcl::PointXYZI, pcl::PointXYZI>::Ptr createRegistration(std::string method, int num_threads,
                                                                             double voxel_resolution = 0.2);
 
-  void performRegistration(const pcl::PointCloud<pcl::PointXYZI>::Ptr cloud,  // NOLINT
+  /**
+   * @brief We have received a new scan, and we need to perform ICP on it
+   *
+   * @param cloud
+   * @param header
+   */
+  void performRegistration(const pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_pcl,  // NOLINT
                            const std_msgs::msg::Header& header);
 
+  /**
+   * @brief We have received a new scan, and we have performed ICP on it now insert it to the map
+   *
+   * @param cloud
+   * @param icp_estimate
+   * @param current_pose
+   * @param header
+   */
   void insertScantoMap(const pcl::PointCloud<pcl::PointXYZI>::Ptr cloud,
                        const Eigen::Matrix4f& icp_estimate,                  // NOLINT
                        const geometry_msgs::msg::PoseStamped& current_pose,  // NOLINT
                        const std_msgs::msg::Header& header);
 
 private:
+  // The live cloud
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr cloud_subscriber_;
+
+  // The additinal odometry
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_subscriber_;
+
+  // Publish current spatio temporal map
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr map_cloud_pub_;
+
+  // Publish submaps for further optimization
   rclcpp::Publisher<vox_nav_slam_msgs::msg::MapArray>::SharedPtr sub_maps_pub_;
+
+  // Publish current pose
   rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pose_pub_;
+
+  // Publish current path
   rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_pub_;
 
   // tf buffer to get access to transfroms
   std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
   std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
+
+  // broadcaster to publish odom to base_link transform
   std::shared_ptr<tf2_ros::TransformBroadcaster> broadcaster_;
 
-  pcl::PointCloud<pcl::PointXYZI>::Ptr targeted_cloud_;
-  pcl::PointCloud<pcl::PointXYZI>::Ptr source_cloud_;
+  // keep the spatio temporal map
+  pcl::PointCloud<pcl::PointXYZI>::Ptr temporal_map_;
+
+  // keep the latest odometry recieved from external source
   nav_msgs::msg::Odometry::SharedPtr latest_odom_msg_;
+
   geometry_msgs::msg::PoseStamped::SharedPtr current_pose_;
   nav_msgs::msg::Path::SharedPtr path_;
+
+  // This will be used to publish submaps for further optimization
   vox_nav_slam_msgs::msg::MapArray::SharedPtr sub_maps_;
 
-  // Traverasblity estimation realted variables
-  std_msgs::msg::Bool::SharedPtr episode_end_;
-
+  // configuration parameters
   ICPParameters icp_params_;
 
+  // ICP registration object
   pcl::Registration<pcl::PointXYZI, pcl::PointXYZI>::Ptr reg_;
 
+  // Global vars to keep track of the map and update it according to standart registration
   bool is_first_cloud_received_{ false };
   std::shared_ptr<std::mutex> mutex_;
   std::shared_ptr<std::thread> icp_thread_;
@@ -152,7 +216,6 @@ private:
   std::shared_ptr<std::future<void>> icp_future_;
   Eigen::Matrix4f previous_odom_mat_{ Eigen::Matrix4f::Identity() };
   Eigen::Matrix4f current_map_origin_{ Eigen::Matrix4f::Identity() };
-  Eigen::Matrix4f previous_icp_mat_{ Eigen::Matrix4f::Identity() };
   Eigen::Vector3f previous_position_{ Eigen::Vector3f::Zero() };
   float translation_from_previous_{ 0.0 };
   float accumulated_translation_{ 0.0 };
@@ -163,4 +226,4 @@ private:
 
 }  // namespace vox_nav_slam
 
-#endif  // VOX_NAV_SLAM__SCAN_MATCHER__FAST_GICP_CLIENT_HPP_
+#endif  // VOX_NAV_SLAM__FAST_GICP_SCAN_MATCHER_COMPONENT_HPP_
