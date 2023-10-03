@@ -189,7 +189,6 @@ void FastGICPOptimComponent::optimizeSubmapGraph(std::vector<Eigen::Matrix4f>& r
   // start the target cloud with the first submap
   pcl::PointCloud<pcl::PointXYZI>::Ptr target_cloud(new pcl::PointCloud<pcl::PointXYZI>);
   pcl::fromROSMsg(map_array_msg_->submaps.front().cloud, *target_cloud);
-  registration_->setInputTarget(target_cloud);
   Eigen::Affine3d init_odom = Eigen::Affine3d::Identity();
   tf2::fromMsg(map_array_msg_->submaps.front().optimized_pose, init_odom);
 
@@ -199,6 +198,8 @@ void FastGICPOptimComponent::optimizeSubmapGraph(std::vector<Eigen::Matrix4f>& r
     pcl::PointCloud<pcl::PointXYZI>::Ptr source_cloud(new pcl::PointCloud<pcl::PointXYZI>);
     pcl::fromROSMsg(map_array_msg_->submaps[i].cloud, *source_cloud);
     registration_->setInputSource(source_cloud);
+    registration_->setInputTarget(target_cloud);
+
     Eigen::Affine3d curr_odom = Eigen::Affine3d::Identity();
     tf2::fromMsg(map_array_msg_->submaps[i].optimized_pose, curr_odom);
 
@@ -215,7 +216,7 @@ void FastGICPOptimComponent::optimizeSubmapGraph(std::vector<Eigen::Matrix4f>& r
     Eigen::Matrix4f updated_current_odom_matrix = (init_odom.matrix().cast<float>() * final_transformation).matrix();
 
     // Print map origin odom
-    if (icp_params_.debug)
+    if (!icp_params_.debug)
     {
       std::cout << "Diagnostics for submap " << i << " and submap 0" << std::endl;
       std::cout << "Map origin odom: \n" << init_odom.matrix() << std::endl;
@@ -244,6 +245,8 @@ void FastGICPOptimComponent::optimizeSubmapGraph(std::vector<Eigen::Matrix4f>& r
 
     // Push initial and final transforms to a vector as pairs
     initial_vs_final_transforms.push_back(std::make_pair(original_pose_matrix, updated_current_odom_matrix));
+
+    *target_cloud += *output_cloud;
   }
   publishUncertaintyMarkers(initial_vs_final_transforms);
 

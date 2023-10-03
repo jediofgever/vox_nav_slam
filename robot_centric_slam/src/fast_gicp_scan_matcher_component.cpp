@@ -251,27 +251,18 @@ void FastGICPScanMatcher::performRegistration(const pcl::PointCloud<pcl::PointXY
   }
 
   // Calculate relative transform between current odom and previous odom
-  Eigen::Affine3d curr_pose_homogenous = Eigen::Affine3d::Identity();
   Eigen::Affine3d latest_odom_homogenous = Eigen::Affine3d::Identity();
-  Eigen::Matrix4f sim_trans = Eigen::Matrix4f::Identity();
-  tf2::fromMsg(current_pose_->pose, curr_pose_homogenous);
   tf2::fromMsg(latest_odom_msg_->pose.pose, latest_odom_homogenous);
-
-  sim_trans = curr_pose_homogenous.matrix().cast<float>();
-
-  if (previous_odom_mat_ != Eigen::Matrix4f::Identity())
-  {
-    Eigen::Matrix4f odom_diff = previous_odom_mat_.inverse() * latest_odom_homogenous.matrix().cast<float>();
-    sim_trans = sim_trans * odom_diff;
-  }
-  previous_odom_mat_ = latest_odom_homogenous.matrix().cast<float>();
 
   // Align clouds
   pcl::PointCloud<pcl::PointXYZI>::Ptr output_cloud(new pcl::PointCloud<pcl::PointXYZI>);
   // calculate time elapsed for ICP alignment
 
   std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
-  reg_->align(*output_cloud, sim_trans.cast<float>());
+  // max rotation epsilon is 15 degrees but use radians
+  reg_->setTransformationRotationEpsilon(0.261799);
+
+  reg_->align(*output_cloud, latest_odom_homogenous.matrix().cast<float>());
   std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
 
   Eigen::Matrix4f final_transformation = reg_->getFinalTransformation();
@@ -317,7 +308,7 @@ void FastGICPScanMatcher::performRegistration(const pcl::PointCloud<pcl::PointXY
     geometry_msgs::msg::PoseStamped current_pose_stamped;
     current_pose_stamped = *current_pose_;
     previous_position_ = position;  // NOLINT
-    icp_task_ = std::packaged_task<void()>(std::bind(&FastGICPScanMatcher::insertScantoMap, this, cloud_downsampled,
+    icp_task_ = std::packaged_task<void()>(std::bind(&FastGICPScanMatcher::insertScantoMap, this, output_cloud,
                                                      final_transformation, current_pose_stamped, header));  // NOLINT
     icp_future_ = std::make_shared<std::future<void>>(icp_task_.get_future());
     icp_thread_ = std::make_shared<std::thread>(std::move(std::ref(icp_task_)));
@@ -335,14 +326,14 @@ void FastGICPScanMatcher::performRegistration(const pcl::PointCloud<pcl::PointXY
       {
         RCLCPP_INFO(get_logger(), "ICP has converged, score is %+.0e", reg_->getFitnessScore());
       }
-      std::cout << "Current Pose homogenenous:" << std::endl;
-      std::cout << curr_pose_homogenous.matrix() << std::endl;
-      // Print the initial guess
-      std::cout << "Initial guess:" << std::endl;
-      std::cout << sim_trans << std::endl;
       // print result transformation
       std::cout << "Transformation matrix:" << std::endl;
       std::cout << final_transformation << std::endl;
+
+      // Raw initial guess
+      std::cout << "Raw initial guess:" << std::endl;
+      std::cout << "latest_odom_homogenous.matrix().cast<float>()" << std::endl;
+      std::cout << latest_odom_homogenous.matrix().cast<float>() << std::endl;
     }
   }
 }
@@ -361,16 +352,10 @@ void FastGICPScanMatcher::insertScantoMap(const pcl::PointCloud<pcl::PointXYZI>:
                          icp_params_.map_voxel_size);
   voxel_grid.filter(*cloud_downsampled);
 
-  // Transform cloud to the map frame
-  pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_transformed(new pcl::PointCloud<pcl::PointXYZI>());
-
-  // Transform it according to the icp estimate
-  pcl::transformPointCloud(*cloud_downsampled, *cloud_transformed, icp_estimate);
-
   temporal_map_->clear();
 
   // Add thge latest cloud to the targeted cloud
-  *temporal_map_ += *cloud_transformed;
+  *temporal_map_ += *cloud_downsampled;
 
   int num_submaps = sub_maps_->submaps.size();
   for (int i = 0; i < icp_params_.max_num_targeted_clouds - 1; i++)
@@ -381,13 +366,9 @@ void FastGICPScanMatcher::insertScantoMap(const pcl::PointCloud<pcl::PointXYZI>:
     }
     pcl::PointCloud<pcl::PointXYZI>::Ptr tmp_ptr(new pcl::PointCloud<pcl::PointXYZI>());
     pcl::fromROSMsg(sub_maps_->submaps[num_submaps - 1 - i].cloud, *tmp_ptr);
-    pcl::PointCloud<pcl::PointXYZI>::Ptr transformed_tmp_ptr(new pcl::PointCloud<pcl::PointXYZI>());
-    Eigen::Affine3d submap_affine;
-    tf2::fromMsg(sub_maps_->submaps[num_submaps - 1 - i].pose, submap_affine);
-    pcl::transformPointCloud(*tmp_ptr, *transformed_tmp_ptr, submap_affine.matrix());
-    *temporal_map_ += *transformed_tmp_ptr;
+    *temporal_map_ += *tmp_ptr;
 
-    if (transformed_tmp_ptr->size() == 0)
+    if (tmp_ptr->size() == 0)
     {
       RCLCPP_WARN(get_logger(), "Submap %d is empty", num_submaps - 1 - i);
     }

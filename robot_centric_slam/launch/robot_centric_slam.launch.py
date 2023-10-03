@@ -24,7 +24,7 @@ def generate_launch_description():
         package="robot_centric_slam",
         executable="vox_nav_slam_node",
         name="vox_nav_slam_node",
-        prefix=["xterm -e gdb -ex run --args"],
+        # prefix=["xterm -e gdb -ex run --args"],
         parameters=[params],
         remappings=[
             ("/cloud_in", "/AGV0/dobbie/sensing/lidar/top/pointcloud_raw_ex"),

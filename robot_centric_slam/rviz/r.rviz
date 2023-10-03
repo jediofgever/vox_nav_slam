@@ -19,6 +19,7 @@ Panels:
         - /MarkerArray3/Status1
         - /MarkerArray3/Topic1
         - /MarkerArray3/Namespaces1
+        - /Odometry1/Shape1
       Splitter Ratio: 0.51106196641922
     Tree Height: 797
   - Class: rviz_common/Selection
@@ -109,9 +110,9 @@ Visualization Manager:
       Enabled: true
       Invert Rainbow: true
       Max Color: 255; 255; 255
-      Max Intensity: 5.025261878967285
+      Max Intensity: 5.5777201652526855
       Min Color: 0; 0; 0
-      Min Intensity: -2.616281032562256
+      Min Intensity: -1.8927090167999268
       Name: OptimizedRobotCentriccMap
       Position Transformer: XYZ
       Selectable: true
@@ -370,8 +371,7 @@ Visualization Manager:
       Enabled: true
       Name: MarkerArray
       Namespaces:
-        acc_covariance: true
-        gyro_covariance: false
+        {}
       Topic:
         Depth: 5
         Durability Policy: Volatile
@@ -393,6 +393,45 @@ Visualization Manager:
         Reliability Policy: Reliable
         Value: /ouster/image
       Value: false
+    - Angle Tolerance: 0.10000000149011612
+      Class: rviz_default_plugins/Odometry
+      Covariance:
+        Orientation:
+          Alpha: 0.5
+          Color: 255; 255; 127
+          Color Style: Unique
+          Frame: Local
+          Offset: 1
+          Scale: 1
+          Value: true
+        Position:
+          Alpha: 0.30000001192092896
+          Color: 204; 51; 204
+          Scale: 1
+          Value: true
+        Value: true
+      Enabled: true
+      Keep: 100
+      Name: Odometry
+      Position Tolerance: 0.10000000149011612
+      Shape:
+        Alpha: 1
+        Axes Length: 1
+        Axes Radius: 0.10000000149011612
+        Color: 255; 255; 0
+        Head Length: 0.30000001192092896
+        Head Radius: 0.10000000149011612
+        Shaft Length: 1
+        Shaft Radius: 0.05000000074505806
+        Value: Arrow
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /kiss_icp/odometry
+      Value: true
   Enabled: true
   Global Options:
     Background Color: 0; 0; 0
@@ -439,7 +478,7 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 66.90009307861328
+      Distance: 31.460655212402344
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
@@ -454,10 +493,10 @@ Visualization Manager:
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 1.5697963237762451
+      Pitch: 1.2497966289520264
       Target Frame: base_link
       Value: Orbit (rviz_default_plugins)
-      Yaw: 5.475716590881348
+      Yaw: 3.235713481903076
     Saved: ~
 Window Geometry:
   Displays:
