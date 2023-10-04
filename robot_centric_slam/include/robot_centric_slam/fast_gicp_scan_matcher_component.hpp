@@ -160,8 +160,9 @@ public:
    * @param header
    */
   void insertScantoMap(const pcl::PointCloud<pcl::PointXYZI>::Ptr cloud,
-                       const Eigen::Matrix4f& icp_estimate,                  // NOLINT
-                       const geometry_msgs::msg::PoseStamped& current_pose,  // NOLINT
+                       const pcl::PointCloud<pcl::PointXYZI>::Ptr output_cloud,  // NOLINT
+                       const Eigen::Matrix4f& icp_estimate,                      // NOLINT
+                       const geometry_msgs::msg::PoseStamped& current_pose,      // NOLINT
                        const std_msgs::msg::Header& header);
 
 private:

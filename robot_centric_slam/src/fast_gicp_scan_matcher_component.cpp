@@ -13,6 +13,13 @@
 // limitations under the License.
 
 #include "robot_centric_slam/fast_gicp_scan_matcher_component.hpp"
+#include <chrono>
+#include <iostream>
+#include <memory>
+#include <string>
+#include <thread>
+#include <vector>
+#include <random>
 
 namespace vox_nav_slam
 {
@@ -170,11 +177,12 @@ void FastGICPScanMatcher::initializeMap(const pcl::PointCloud<pcl::PointXYZI>::P
   pcl::transformPointCloud(*cloud_downsampled, *transformed_cloud_ptr, current_map_origin_);
 
   // This is the first cloud, so set it as the target cloud
+  temporal_map_ = transformed_cloud_ptr;
   reg_->setInputTarget(transformed_cloud_ptr);
 
   // map array
   sensor_msgs::msg::PointCloud2::SharedPtr cloud_msg_ptr(new sensor_msgs::msg::PointCloud2);
-  pcl::toROSMsg(*transformed_cloud_ptr, *cloud_msg_ptr);
+  pcl::toROSMsg(*cloud_downsampled, *cloud_msg_ptr);
 
   // push as the first submap
   vox_nav_slam_msgs::msg::SubMap submap;
@@ -210,9 +218,9 @@ void FastGICPScanMatcher::performRegistration(const pcl::PointCloud<pcl::PointXY
   pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_downsampled(new pcl::PointCloud<pcl::PointXYZI>());
   pcl::VoxelGrid<pcl::PointXYZI> voxel_grid;
   voxel_grid.setInputCloud(cloud_cropped);
-  voxel_grid.setLeafSize(icp_params_.downsample_voxel_size,  // NOLINT
-                         icp_params_.downsample_voxel_size,  // NOLINT
-                         icp_params_.downsample_voxel_size);
+  voxel_grid.setLeafSize(icp_params_.downsample_voxel_size,   // NOLINT
+                         icp_params_.downsample_voxel_size,   // NOLINT
+                         icp_params_.downsample_voxel_size);  // NOLINT
   voxel_grid.filter(*cloud_downsampled);
 
   // set the source cloud to current cloud
@@ -259,9 +267,9 @@ void FastGICPScanMatcher::performRegistration(const pcl::PointCloud<pcl::PointXY
   // calculate time elapsed for ICP alignment
 
   std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
-  // max rotation epsilon is 15 degrees but use radians
-  reg_->setTransformationRotationEpsilon(0.261799);
-
+  // max rotation epsilon is 45 degrees but use radians
+  reg_->setTransformationRotationEpsilon(0.78539816339);
+  reg_->setEuclideanFitnessEpsilon(0.0000001);
   reg_->align(*output_cloud, latest_odom_homogenous.matrix().cast<float>());
   std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
 
@@ -308,8 +316,9 @@ void FastGICPScanMatcher::performRegistration(const pcl::PointCloud<pcl::PointXY
     geometry_msgs::msg::PoseStamped current_pose_stamped;
     current_pose_stamped = *current_pose_;
     previous_position_ = position;  // NOLINT
-    icp_task_ = std::packaged_task<void()>(std::bind(&FastGICPScanMatcher::insertScantoMap, this, output_cloud,
-                                                     final_transformation, current_pose_stamped, header));  // NOLINT
+    icp_task_ = std::packaged_task<void()>(std::bind(&FastGICPScanMatcher::insertScantoMap, this, cloud_downsampled,
+                                                     output_cloud, final_transformation, current_pose_stamped,
+                                                     header));  // NOLINT
     icp_future_ = std::make_shared<std::future<void>>(icp_task_.get_future());
     icp_thread_ = std::make_shared<std::thread>(std::move(std::ref(icp_task_)));
     mapping_flag_ = true;
@@ -339,17 +348,18 @@ void FastGICPScanMatcher::performRegistration(const pcl::PointCloud<pcl::PointXY
 }
 
 void FastGICPScanMatcher::insertScantoMap(const pcl::PointCloud<pcl::PointXYZI>::Ptr cloud,
-                                          const Eigen::Matrix4f& icp_estimate,  // NOLINT
+                                          const pcl::PointCloud<pcl::PointXYZI>::Ptr output_cloud,  // NOLINT
+                                          const Eigen::Matrix4f& icp_estimate,                      // NOLINT
                                           const geometry_msgs::msg::PoseStamped& current_pose,
                                           const std_msgs::msg::Header& header)
 {
   // Downsample cloud according to the voxel size of the map
   pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_downsampled(new pcl::PointCloud<pcl::PointXYZI>());
   pcl::VoxelGrid<pcl::PointXYZI> voxel_grid;
-  voxel_grid.setInputCloud(cloud);
-  voxel_grid.setLeafSize(icp_params_.map_voxel_size,  // NOLINT
-                         icp_params_.map_voxel_size,  // NOLINT
-                         icp_params_.map_voxel_size);
+  voxel_grid.setInputCloud(output_cloud);
+  voxel_grid.setLeafSize(icp_params_.map_voxel_size,   // NOLINT
+                         icp_params_.map_voxel_size,   // NOLINT
+                         icp_params_.map_voxel_size);  // NOLINT
   voxel_grid.filter(*cloud_downsampled);
 
   temporal_map_->clear();
@@ -358,6 +368,7 @@ void FastGICPScanMatcher::insertScantoMap(const pcl::PointCloud<pcl::PointXYZI>:
   *temporal_map_ += *cloud_downsampled;
 
   int num_submaps = sub_maps_->submaps.size();
+
   for (int i = 0; i < icp_params_.max_num_targeted_clouds - 1; i++)
   {
     if (num_submaps - 1 - i < 0)
@@ -366,6 +377,11 @@ void FastGICPScanMatcher::insertScantoMap(const pcl::PointCloud<pcl::PointXYZI>:
     }
     pcl::PointCloud<pcl::PointXYZI>::Ptr tmp_ptr(new pcl::PointCloud<pcl::PointXYZI>());
     pcl::fromROSMsg(sub_maps_->submaps[num_submaps - 1 - i].cloud, *tmp_ptr);
+    Eigen::Affine3d tmp_pose = Eigen::Affine3d::Identity();
+    tf2::fromMsg(sub_maps_->submaps[num_submaps - 1 - i].pose, tmp_pose);
+    Eigen::Matrix4f tmp_mat = tmp_pose.matrix().cast<float>();
+    pcl::transformPointCloud(*tmp_ptr, *tmp_ptr, tmp_mat);
+
     *temporal_map_ += *tmp_ptr;
 
     if (tmp_ptr->size() == 0)
@@ -380,8 +396,9 @@ void FastGICPScanMatcher::insertScantoMap(const pcl::PointCloud<pcl::PointXYZI>:
   map_msg_ptr->header.stamp = header.stamp;
   map_cloud_pub_->publish(*map_msg_ptr);
 
+  // Use non-transformed cloud for submap
   sensor_msgs::msg::PointCloud2::SharedPtr cloud_msg_ptr(new sensor_msgs::msg::PointCloud2);
-  pcl::toROSMsg(*cloud_downsampled, *cloud_msg_ptr);
+  pcl::toROSMsg(*cloud, *cloud_msg_ptr);
 
   vox_nav_slam_msgs::msg::SubMap submap;
   submap.header.frame_id = "odom";

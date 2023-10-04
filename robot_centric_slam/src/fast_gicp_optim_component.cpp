@@ -141,36 +141,6 @@ void FastGICPOptimComponent::icpThread()
     }
 
     modified_path_pub_->publish(modified_path);
-
-    // Publish modified map
-    sensor_msgs::msg::PointCloud2 modified_map;
-    pcl::PointCloud<pcl::PointXYZI>::Ptr modified_map_ptr(new pcl::PointCloud<pcl::PointXYZI>());
-    int num_submaps = map_array_msg_->submaps.size();
-
-    for (int i = 0; i < icp_params_.max_num_targeted_clouds - 1; i++)
-    {
-      if (num_submaps - 1 - i < 0)
-      {
-        continue;
-      }
-
-      pcl::PointCloud<pcl::PointXYZI>::Ptr tmp_ptr(new pcl::PointCloud<pcl::PointXYZI>());
-      pcl::fromROSMsg(map_array_msg_->submaps[num_submaps - 1 - i].cloud, *tmp_ptr);
-      pcl::PointCloud<pcl::PointXYZI>::Ptr transformed_tmp_ptr(new pcl::PointCloud<pcl::PointXYZI>());
-      Eigen::Affine3d submap_affine;
-      tf2::fromMsg(map_array_msg_->submaps[num_submaps - 1 - i].optimized_pose, submap_affine);
-      pcl::transformPointCloud(*tmp_ptr, *transformed_tmp_ptr, submap_affine.matrix());
-      *modified_map_ptr += *transformed_tmp_ptr;
-
-      if (transformed_tmp_ptr->size() == 0)
-      {
-        RCLCPP_WARN(get_logger(), "Submap %d is empty", num_submaps - 1 - i);
-      }
-    }
-    pcl::toROSMsg(*modified_map_ptr, modified_map);
-    modified_map.header = map_array_msg_->header;
-    modified_map_pub_->publish(modified_map);
-
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
   }
 }
@@ -192,23 +162,31 @@ void FastGICPOptimComponent::optimizeSubmapGraph(std::vector<Eigen::Matrix4f>& r
   Eigen::Affine3d init_odom = Eigen::Affine3d::Identity();
   tf2::fromMsg(map_array_msg_->submaps.front().optimized_pose, init_odom);
 
+  // Trans the first map to the origin
+  pcl::transformPointCloud(*target_cloud, *target_cloud, init_odom.matrix().cast<float>());
+
   for (int i = 1; i < map_array_msg_->submaps.size(); i++)
   {
     // Contiously update the pose of submaps with the refined transforms
     pcl::PointCloud<pcl::PointXYZI>::Ptr source_cloud(new pcl::PointCloud<pcl::PointXYZI>);
     pcl::fromROSMsg(map_array_msg_->submaps[i].cloud, *source_cloud);
-    registration_->setInputSource(source_cloud);
+
     registration_->setInputTarget(target_cloud);
 
+    // Trans the source cloud to the pose
     Eigen::Affine3d curr_odom = Eigen::Affine3d::Identity();
     tf2::fromMsg(map_array_msg_->submaps[i].optimized_pose, curr_odom);
+    // pcl::transformPointCloud(*source_cloud, *source_cloud, curr_odom.matrix().cast<float>());
+    registration_->setInputSource(source_cloud);
 
+    registration_->setTransformationRotationEpsilon(60.0);
+    registration_->setEuclideanFitnessEpsilon(0.0000001);
     // get relative transform between current odom and previous odom
     Eigen::Matrix4f odom_diff = (init_odom.inverse() * curr_odom).matrix().cast<float>();
 
     // Perform ICP
     pcl::PointCloud<pcl::PointXYZI>::Ptr output_cloud(new pcl::PointCloud<pcl::PointXYZI>);
-    registration_->align(*output_cloud, odom_diff);
+    registration_->align(*output_cloud, curr_odom.matrix().cast<float>());
     Eigen::Matrix4f final_transformation = registration_->getFinalTransformation();
 
     // get the updated curr_odom with the final transformation
@@ -216,7 +194,7 @@ void FastGICPOptimComponent::optimizeSubmapGraph(std::vector<Eigen::Matrix4f>& r
     Eigen::Matrix4f updated_current_odom_matrix = (init_odom.matrix().cast<float>() * final_transformation).matrix();
 
     // Print map origin odom
-    if (!icp_params_.debug)
+    if (icp_params_.debug)
     {
       std::cout << "Diagnostics for submap " << i << " and submap 0" << std::endl;
       std::cout << "Map origin odom: \n" << init_odom.matrix() << std::endl;
@@ -226,8 +204,8 @@ void FastGICPOptimComponent::optimizeSubmapGraph(std::vector<Eigen::Matrix4f>& r
       std::cout << "Updated current odom: \n" << updated_current_odom_matrix << std::endl;
     }
 
-    Eigen::Vector3f position = updated_current_odom_matrix.block<3, 1>(0, 3).cast<float>();
-    Eigen::Matrix3f rot_mat = updated_current_odom_matrix.block<3, 3>(0, 0).cast<float>();
+    Eigen::Vector3f position = final_transformation.block<3, 1>(0, 3).cast<float>();
+    Eigen::Matrix3f rot_mat = final_transformation.block<3, 3>(0, 0).cast<float>();
     Eigen::Quaternionf quat_eig(rot_mat);
     geometry_msgs::msg::Quaternion quat_msg = tf2::toMsg(quat_eig.cast<double>());
 
@@ -236,7 +214,7 @@ void FastGICPOptimComponent::optimizeSubmapGraph(std::vector<Eigen::Matrix4f>& r
     map_array_msg_->submaps[i].optimized_pose.position.z = position.z();
     map_array_msg_->submaps[i].optimized_pose.orientation = quat_msg;
 
-    refined_transforms.push_back(updated_current_odom_matrix);
+    refined_transforms.push_back(final_transformation);
 
     // compare it to original odometry
     Eigen::Affine3d original_pose = Eigen::Affine3d::Identity();
@@ -249,6 +227,20 @@ void FastGICPOptimComponent::optimizeSubmapGraph(std::vector<Eigen::Matrix4f>& r
     *target_cloud += *output_cloud;
   }
   publishUncertaintyMarkers(initial_vs_final_transforms);
+
+  // downsample the target cloud
+  pcl::PointCloud<pcl::PointXYZI>::Ptr downsampled_target_cloud(new pcl::PointCloud<pcl::PointXYZI>);
+  pcl::VoxelGrid<pcl::PointXYZI> voxel_grid;
+  voxel_grid.setInputCloud(target_cloud);
+  voxel_grid.setLeafSize(icp_params_.map_voxel_size, icp_params_.map_voxel_size, icp_params_.map_voxel_size);
+  voxel_grid.filter(*downsampled_target_cloud);
+  target_cloud = downsampled_target_cloud;
+
+  // Publish modified map
+  sensor_msgs::msg::PointCloud2 modified_map;
+  pcl::toROSMsg(*target_cloud, modified_map);
+  modified_map.header = map_array_msg_->header;
+  modified_map_pub_->publish(modified_map);
 
   auto end = std::chrono::high_resolution_clock::now();
   std::chrono::duration<double> elapsed = end - start;
