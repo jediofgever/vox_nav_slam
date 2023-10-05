@@ -39,11 +39,6 @@ FastGICPScanMatcher::FastGICPScanMatcher(const rclcpp::NodeOptions& options)  //
   icp_thread_ = std::make_shared<std::thread>();
   icp_future_ = std::make_shared<std::future<void>>();
 
-  // Init all pub and subs
-  cloud_subscriber_ = this->create_subscription<sensor_msgs::msg::PointCloud2>(
-      "cloud_in", rclcpp::SensorDataQoS(), std::bind(&FastGICPScanMatcher::cloudCallback, this, std::placeholders::_1));
-  odom_subscriber_ = this->create_subscription<nav_msgs::msg::Odometry>(
-      "odom_in", rclcpp::SensorDataQoS(), std::bind(&FastGICPScanMatcher::odomCallback, this, std::placeholders::_1));
   map_cloud_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(  // NOLINT
       "map_cloud", rclcpp::QoS(rclcpp::KeepLast(1)).reliable());
   sub_maps_pub_ = this->create_publisher<vox_nav_slam_msgs::msg::MapArray>(  // NOLINT
@@ -52,6 +47,15 @@ FastGICPScanMatcher::FastGICPScanMatcher(const rclcpp::NodeOptions& options)  //
       "pose", rclcpp::QoS(rclcpp::KeepLast(1)).reliable());
   path_pub_ = this->create_publisher<nav_msgs::msg::Path>(  // NOLINT
       "path", rclcpp::QoS(rclcpp::KeepLast(1)).reliable());
+
+  // message filters
+  cloud_sub_.subscribe(this, "cloud_in", rmw_qos_profile_sensor_data);
+  odom_sub_.subscribe(this, "odom_in", rmw_qos_profile_sensor_data);
+  imu_sub_.subscribe(this, "imu_in", rmw_qos_profile_sensor_data);
+
+  sync_.reset(new Sync(MySyncPolicy(50), cloud_sub_, odom_sub_, imu_sub_));
+  sync_->registerCallback(std::bind(&FastGICPScanMatcher::cloudOdomImuCallback, this, std::placeholders::_1,
+                                    std::placeholders::_2, std::placeholders::_3));
 
   // Define parameters
   declare_parameter("x_bound", icp_params_.x_bound);
@@ -108,6 +112,13 @@ FastGICPScanMatcher::FastGICPScanMatcher(const rclcpp::NodeOptions& options)  //
   RCLCPP_INFO_STREAM(get_logger(), "debug: " << icp_params_.debug);
 
   RCLCPP_INFO(get_logger(), "Creating...");
+
+  // broadcast an initial odom -> base_link transform as zeros
+  geometry_msgs::msg::TransformStamped transform_stamped;
+  transform_stamped.header.stamp = now();
+  transform_stamped.header.frame_id = "odom";
+  transform_stamped.child_frame_id = "base_link";
+  broadcaster_->sendTransform(transform_stamped);
 }
 
 FastGICPScanMatcher::~FastGICPScanMatcher()
@@ -115,23 +126,13 @@ FastGICPScanMatcher::~FastGICPScanMatcher()
   RCLCPP_INFO(get_logger(), "Destroying...");
 }
 
-void FastGICPScanMatcher::odomCallback(const nav_msgs::msg::Odometry::ConstSharedPtr odom)
+void FastGICPScanMatcher::cloudOdomImuCallback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr cloud,
+                                               const nav_msgs::msg::Odometry::ConstSharedPtr odom,
+                                               const sensor_msgs::msg::Imu::ConstSharedPtr imu)
 {
   std::lock_guard<std::mutex> lock(*mutex_);
-  latest_odom_msg_ = std::make_shared<nav_msgs::msg::Odometry>(*odom);
-  is_odom_updated_ = true;
-}
 
-void FastGICPScanMatcher::cloudCallback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr cloud)
-{
-  std::lock_guard<std::mutex> lock(*mutex_);
-  if (!is_odom_updated_)
-  {
-    RCLCPP_WARN(get_logger(),
-                "Odometry is not updated yet!, currently this methods requires odometry to be published "
-                "before the first pointcloud is received.");
-    return;
-  }
+  latest_odom_msg_ = std::make_shared<nav_msgs::msg::Odometry>(*odom);
 
   sensor_msgs::msg::PointCloud2::SharedPtr output(new sensor_msgs::msg::PointCloud2);
   pcl_ros::transformPointCloud("base_link", *cloud, *output, *tf_buffer_);

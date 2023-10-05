@@ -45,6 +45,9 @@
 #include <std_msgs/msg/bool.hpp>
 #include <visualization_msgs/msg/marker.hpp>
 #include <visualization_msgs/msg/marker_array.hpp>
+#include <message_filters/subscriber.h>
+#include <message_filters/sync_policies/approximate_time.h>
+#include <message_filters/time_synchronizer.h>
 
 #include <fast_gicp/gicp/fast_gicp.hpp>
 #include <fast_gicp/gicp/fast_gicp_st.hpp>
@@ -166,7 +169,22 @@ public:
                        const geometry_msgs::msg::PoseStamped& current_pose,      // NOLINT
                        const std_msgs::msg::Header& header);
 
+  void cloudOdomImuCallback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr cloud,
+                            const nav_msgs::msg::Odometry::ConstSharedPtr odom,
+                            const sensor_msgs::msg::Imu::ConstSharedPtr imu);
+
 private:
+  // use ApproximateTime policy to synchronize imu and pointcloud and odometry messages
+  typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::msg::PointCloud2, nav_msgs::msg::Odometry,
+                                                          sensor_msgs::msg::Imu>
+      MySyncPolicy;
+  typedef message_filters::Synchronizer<MySyncPolicy> Sync;
+  std::shared_ptr<Sync> sync_;
+
+  message_filters::Subscriber<sensor_msgs::msg::PointCloud2> cloud_sub_;
+  message_filters::Subscriber<nav_msgs::msg::Odometry> odom_sub_;
+  message_filters::Subscriber<sensor_msgs::msg::Imu> imu_sub_;
+
   // The live cloud
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr cloud_subscriber_;
 
