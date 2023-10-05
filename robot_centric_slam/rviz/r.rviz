@@ -13,14 +13,14 @@ Panels:
         - /TF1/Frames1
         - /MarkerArray2/Namespaces1
         - /Imu1/Topic1
-        - /Imu1/Box properties1
-        - /Imu1/Axes properties1
         - /Imu1/Acceleration properties1
         - /MarkerArray3/Status1
         - /MarkerArray3/Topic1
         - /MarkerArray3/Namespaces1
         - /Odometry1/Shape1
-      Splitter Ratio: 0.51106196641922
+        - /RobotModel1/Status1
+        - /RobotModel1/Description Topic1
+      Splitter Ratio: 0.6264705657958984
     Tree Height: 797
   - Class: rviz_common/Selection
     Name: Selection
@@ -110,9 +110,9 @@ Visualization Manager:
       Enabled: true
       Invert Rainbow: true
       Max Color: 255; 255; 255
-      Max Intensity: 5.5777201652526855
+      Max Intensity: 6.584375381469727
       Min Color: 0; 0; 0
-      Min Intensity: -1.8927090167999268
+      Min Intensity: -2.514071464538574
       Name: OptimizedRobotCentriccMap
       Position Transformer: XYZ
       Selectable: true
@@ -161,7 +161,7 @@ Visualization Manager:
       Axes Length: 1
       Axes Radius: 0.10000000149011612
       Class: rviz_default_plugins/Pose
-      Color: 255; 25; 0
+      Color: 255; 255; 0
       Enabled: true
       Head Length: 0.30000001192092896
       Head Radius: 0.10000000149011612
@@ -182,8 +182,8 @@ Visualization Manager:
       Class: rviz_default_plugins/Path
       Color: 25; 0; 255
       Enabled: true
-      Head Diameter: 0.25
-      Head Length: 0.25
+      Head Diameter: 0.10000000149011612
+      Head Length: 0.10000000149011612
       Length: 0.30000001192092896
       Line Style: Lines
       Line Width: 0.029999999329447746
@@ -195,8 +195,8 @@ Visualization Manager:
       Pose Color: 255; 85; 255
       Pose Style: Arrows
       Radius: 0.029999999329447746
-      Shaft Diameter: 0.25
-      Shaft Length: 0.25
+      Shaft Diameter: 0.10000000149011612
+      Shaft Length: 0.10000000149011612
       Topic:
         Depth: 5
         Durability Policy: Volatile
@@ -335,11 +335,11 @@ Visualization Manager:
     - Acceleration properties:
         Acc. vector alpha: 1
         Acc. vector color: 255; 0; 0
-        Acc. vector scale: 1
+        Acc. vector scale: 0.05000000074505806
         Derotate acceleration: true
-        Enable acceleration: false
+        Enable acceleration: true
       Axes properties:
-        Axes scale: 0.800000011920929
+        Axes scale: 0.20000000298023224
         Enable axes: true
       Box properties:
         Box alpha: 1
@@ -432,6 +432,77 @@ Visualization Manager:
         Reliability Policy: Reliable
         Value: /kiss_icp/odometry
       Value: true
+    - Alpha: 1
+      Class: rviz_default_plugins/RobotModel
+      Collision Enabled: false
+      Description File: ""
+      Description Source: Topic
+      Description Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+        Value: /robot_description
+      Enabled: true
+      Links:
+        All Links Enabled: true
+        Expand Joint Details: false
+        Expand Link Details: false
+        Expand Tree: false
+        Link Tree Style: Links in Alphabetic Order
+        base_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        camera_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        camera_optical_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        fl_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        fr_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        imu_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        os_sensor:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+        rl_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        rr_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        sensor_kit_base_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+      Mass Properties:
+        Inertia: false
+        Mass: false
+      Name: RobotModel
+      TF Prefix: ""
+      Update Interval: 0
+      Value: true
+      Visual Enabled: true
   Enabled: true
   Global Options:
     Background Color: 0; 0; 0
@@ -478,25 +549,25 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 31.460655212402344
+      Distance: 11.811529159545898
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
         Swap Stereo Eyes: false
         Value: false
       Focal Point:
-        X: -0.47794800996780396
-        Y: 0.35570475459098816
-        Z: -2.061962604522705
+        X: 0.045776933431625366
+        Y: 0.907738208770752
+        Z: 0.11111298948526382
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 1.2497966289520264
+      Pitch: 0.7897970676422119
       Target Frame: base_link
       Value: Orbit (rviz_default_plugins)
-      Yaw: 3.235713481903076
+      Yaw: 4.970688819885254
     Saved: ~
 Window Geometry:
   Displays:

@@ -27,6 +27,7 @@
 #include <pcl_ros/transforms.hpp>
 #include <pcl/registration/registration.h>
 #include <pcl/filters/voxel_grid.h>
+#include <pcl/registration/ndt.h>
 
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/imu.hpp>

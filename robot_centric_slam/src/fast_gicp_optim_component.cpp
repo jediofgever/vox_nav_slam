@@ -54,7 +54,7 @@ FastGICPOptimComponent::FastGICPOptimComponent(const rclcpp::NodeOptions& option
   get_parameter("debug", icp_params_.debug);
 
   // Init registration with given parameters
-  registration_ = createRegistration(icp_params_.method, icp_params_.num_threads);
+  registration_ = createRegistration(icp_params_.method, icp_params_.num_threads, icp_params_.map_voxel_size);
   if (!registration_)
   {
     RCLCPP_ERROR(get_logger(), "Failed to create registration");
@@ -62,6 +62,8 @@ FastGICPOptimComponent::FastGICPOptimComponent(const rclcpp::NodeOptions& option
   }
   registration_->setMaximumIterations(icp_params_.max_icp_iter);
   registration_->setMaxCorrespondenceDistance(icp_params_.max_correspondence_distance);
+  registration_->setTransformationRotationEpsilon(60.0);
+  registration_->setEuclideanFitnessEpsilon(0.0000001);
 
   map_array_sub_ = create_subscription<vox_nav_slam_msgs::msg::MapArray>(
       "sub_maps", rclcpp::QoS(rclcpp::KeepLast(1)).reliable(),
@@ -157,20 +159,23 @@ void FastGICPOptimComponent::optimizeSubmapGraph(std::vector<Eigen::Matrix4f>& r
   std::vector<std::pair<Eigen::Matrix4f, Eigen::Matrix4f>> initial_vs_final_transforms;
 
   // start the target cloud with the first submap
-  pcl::PointCloud<pcl::PointXYZI>::Ptr target_cloud(new pcl::PointCloud<pcl::PointXYZI>);
-  pcl::fromROSMsg(map_array_msg_->submaps.front().cloud, *target_cloud);
+  pcl::PointCloud<pcl::PointXYZI>::Ptr map_cloud(new pcl::PointCloud<pcl::PointXYZI>);
+  pcl::fromROSMsg(map_array_msg_->submaps.front().cloud, *map_cloud);
   Eigen::Affine3d init_odom = Eigen::Affine3d::Identity();
   tf2::fromMsg(map_array_msg_->submaps.front().optimized_pose, init_odom);
-
-  // Trans the first map to the origin
-  pcl::transformPointCloud(*target_cloud, *target_cloud, init_odom.matrix().cast<float>());
+  pcl::transformPointCloud(*map_cloud, *map_cloud, init_odom.matrix().cast<float>());
 
   for (int i = 1; i < map_array_msg_->submaps.size(); i++)
   {
+    pcl::PointCloud<pcl::PointXYZI>::Ptr target_cloud(new pcl::PointCloud<pcl::PointXYZI>);
+    pcl::fromROSMsg(map_array_msg_->submaps[i - 1].cloud, *target_cloud);
+    Eigen::Affine3d init_odom = Eigen::Affine3d::Identity();
+    tf2::fromMsg(map_array_msg_->submaps[i - 1].optimized_pose, init_odom);
+    pcl::transformPointCloud(*target_cloud, *target_cloud, init_odom.matrix().cast<float>());
+
     // Contiously update the pose of submaps with the refined transforms
     pcl::PointCloud<pcl::PointXYZI>::Ptr source_cloud(new pcl::PointCloud<pcl::PointXYZI>);
     pcl::fromROSMsg(map_array_msg_->submaps[i].cloud, *source_cloud);
-
     registration_->setInputTarget(target_cloud);
 
     // Trans the source cloud to the pose
@@ -179,8 +184,6 @@ void FastGICPOptimComponent::optimizeSubmapGraph(std::vector<Eigen::Matrix4f>& r
     // pcl::transformPointCloud(*source_cloud, *source_cloud, curr_odom.matrix().cast<float>());
     registration_->setInputSource(source_cloud);
 
-    registration_->setTransformationRotationEpsilon(60.0);
-    registration_->setEuclideanFitnessEpsilon(0.0000001);
     // get relative transform between current odom and previous odom
     Eigen::Matrix4f odom_diff = (init_odom.inverse() * curr_odom).matrix().cast<float>();
 
@@ -224,21 +227,21 @@ void FastGICPOptimComponent::optimizeSubmapGraph(std::vector<Eigen::Matrix4f>& r
     // Push initial and final transforms to a vector as pairs
     initial_vs_final_transforms.push_back(std::make_pair(original_pose_matrix, updated_current_odom_matrix));
 
-    *target_cloud += *output_cloud;
+    *map_cloud += *output_cloud;
   }
   publishUncertaintyMarkers(initial_vs_final_transforms);
 
   // downsample the target cloud
   pcl::PointCloud<pcl::PointXYZI>::Ptr downsampled_target_cloud(new pcl::PointCloud<pcl::PointXYZI>);
   pcl::VoxelGrid<pcl::PointXYZI> voxel_grid;
-  voxel_grid.setInputCloud(target_cloud);
+  voxel_grid.setInputCloud(map_cloud);
   voxel_grid.setLeafSize(icp_params_.map_voxel_size, icp_params_.map_voxel_size, icp_params_.map_voxel_size);
   voxel_grid.filter(*downsampled_target_cloud);
-  target_cloud = downsampled_target_cloud;
+  map_cloud = downsampled_target_cloud;
 
   // Publish modified map
   sensor_msgs::msg::PointCloud2 modified_map;
-  pcl::toROSMsg(*target_cloud, modified_map);
+  pcl::toROSMsg(*map_cloud, modified_map);
   modified_map.header = map_array_msg_->header;
   modified_map_pub_->publish(modified_map);
 
@@ -341,6 +344,21 @@ FastGICPOptimComponent::createRegistration(std::string method,  // NOLINT
     ndt->setNeighborSearchMethod(fast_gicp::NeighborSearchMethod::DIRECT_RADIUS, 0.8);
     return ndt;
   }
+  else if (method == "PCL_NDT")
+  {
+    auto pcl_ndt = pcl::make_shared<pcl::NormalDistributionsTransform<pcl::PointXYZI, pcl::PointXYZI>>();
+    // Setting scale dependent NDT parameters
+    // Setting minimum transformation difference for termination condition.
+    pcl_ndt->setTransformationEpsilon(0.01);
+    // Setting maximum step size for More-Thuente line search.
+    pcl_ndt->setStepSize(0.1);
+    // Setting Resolution of NDT grid structure (VoxelGridCovariance).
+    pcl_ndt->setResolution(1.0);
+    // Setting max number of registration iterations.
+    pcl_ndt->setMaximumIterations(50);
+    return pcl_ndt;
+  }
+
   std::throw_with_nested(std::runtime_error("unknown registration method"));
 
   return nullptr;

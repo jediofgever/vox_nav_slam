@@ -91,6 +91,8 @@ FastGICPScanMatcher::FastGICPScanMatcher(const rclcpp::NodeOptions& options)  //
   }
   reg_->setMaximumIterations(icp_params_.max_icp_iter);
   reg_->setMaxCorrespondenceDistance(icp_params_.max_correspondence_distance);
+  reg_->setTransformationRotationEpsilon(0.78539816339);
+  reg_->setEuclideanFitnessEpsilon(0.0000001);
 
   // Print parameters
   RCLCPP_INFO_STREAM(get_logger(), "x_bound: " << icp_params_.x_bound);
@@ -131,8 +133,11 @@ void FastGICPScanMatcher::cloudCallback(const sensor_msgs::msg::PointCloud2::Con
     return;
   }
 
+  sensor_msgs::msg::PointCloud2::SharedPtr output(new sensor_msgs::msg::PointCloud2);
+  pcl_ros::transformPointCloud("base_link", *cloud, *output, *tf_buffer_);
+
   pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_pcl(new pcl::PointCloud<pcl::PointXYZI>());
-  pcl::fromROSMsg(*cloud, *cloud_pcl);
+  pcl::fromROSMsg(*output, *cloud_pcl);
   // Crop cloud to ROI with crop box filter
   pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_cropped(new pcl::PointCloud<pcl::PointXYZI>());
 
@@ -268,8 +273,7 @@ void FastGICPScanMatcher::performRegistration(const pcl::PointCloud<pcl::PointXY
 
   std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
   // max rotation epsilon is 45 degrees but use radians
-  reg_->setTransformationRotationEpsilon(0.78539816339);
-  reg_->setEuclideanFitnessEpsilon(0.0000001);
+
   reg_->align(*output_cloud, latest_odom_homogenous.matrix().cast<float>());
   std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
 
@@ -454,7 +458,8 @@ pcl::Registration<pcl::PointXYZI, pcl::PointXYZI>::Ptr FastGICPScanMatcher::crea
   {
     auto vgicp_cuda = pcl::make_shared<fast_gicp::FastVGICPCuda<pcl::PointXYZI, pcl::PointXYZI>>();
     vgicp_cuda->setResolution(voxel_resolution);
-    vgicp_cuda->setNearestNeighborSearchMethod(fast_gicp::NearestNeighborMethod::GPU_RBF_KERNEL);
+    vgicp_cuda->setNearestNeighborSearchMethod(fast_gicp::NearestNeighborMethod::GPU_BRUTEFORCE);
+
     return vgicp_cuda;
   }
   else if (method == "NDT_CUDA")
@@ -462,9 +467,24 @@ pcl::Registration<pcl::PointXYZI, pcl::PointXYZI>::Ptr FastGICPScanMatcher::crea
     auto ndt = pcl::make_shared<fast_gicp::NDTCuda<pcl::PointXYZI, pcl::PointXYZI>>();
     ndt->setResolution(voxel_resolution);
     ndt->setDistanceMode(fast_gicp::NDTDistanceMode::P2D);
-    ndt->setNeighborSearchMethod(fast_gicp::NeighborSearchMethod::DIRECT_RADIUS, 0.8);
+    ndt->setNeighborSearchMethod(fast_gicp::NeighborSearchMethod::DIRECT_RADIUS, voxel_resolution);
     return ndt;
   }
+  else if (method == "PCL_NDT")
+  {
+    auto pcl_ndt = pcl::make_shared<pcl::NormalDistributionsTransform<pcl::PointXYZI, pcl::PointXYZI>>();
+    // Setting scale dependent NDT parameters
+    // Setting minimum transformation difference for termination condition.
+    pcl_ndt->setTransformationEpsilon(0.01);
+    // Setting maximum step size for More-Thuente line search.
+    pcl_ndt->setStepSize(0.1);
+    // Setting Resolution of NDT grid structure (VoxelGridCovariance).
+    pcl_ndt->setResolution(0.1);
+    // Setting max number of registration iterations.
+    pcl_ndt->setMaximumIterations(50);
+    return pcl_ndt;
+  }
+
   std::throw_with_nested(std::runtime_error("unknown registration method"));
 
   return nullptr;

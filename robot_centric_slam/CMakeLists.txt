@@ -143,7 +143,7 @@ install(
   DIRECTORY "include/"
   DESTINATION include)
 install(
-  DIRECTORY launch param
+  DIRECTORY launch param meshes
   DESTINATION share/${PROJECT_NAME})
 install(TARGETS
 fast_gicp_optim_component

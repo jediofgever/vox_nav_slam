@@ -1,13 +1,17 @@
 <?xml version="1.0"?>
-<robot name="lio"
-  xmlns:xacro="http://tixiaoshan.github.io/">
-  <xacro:property name="PI" value="3.1415926535897931" />
+<!-- created with Phobos 1.0.1 "Capricious Choutengan" -->
+<robot name="hobbit">
 
   <link name="base_link">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="20.0"/>
+      <inertia ixx="0.11534" ixy="0" ixz="0" iyy="0.05038" iyz="0" izz="0.03303"/>
+    </inertial>
     <visual name="Body">
       <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
-        <mesh filename="package://robot_centric_slam/meshes/dae/Cube.004.dae" scale="0.66667 0.5 0.5"/>
+        <mesh filename="../meshes/dae/Cube.004.dae" scale="0.66667 0.5 0.5"/>
       </geometry>
       <material name="rubber.001"/>
     </visual>
@@ -22,7 +26,7 @@
     <visual name="FrontLeft">
       <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
-        <mesh filename="package://robot_centric_slam/meshes/dae/Circle.002.dae" scale="0.015 0.015 0.01"/>
+        <mesh filename="../meshes/dae/Circle.002.dae" scale="0.015 0.015 0.01"/>
       </geometry>
       <material name="rubber.001"/>
     </visual>
@@ -43,7 +47,7 @@
     <visual name="FrontRight">
       <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
-        <mesh filename="package://robot_centric_slam/meshes/dae/Circle.001.dae" scale="0.015 0.015 0.01"/>
+        <mesh filename="../meshes/dae/Circle.001.dae" scale="0.015 0.015 0.01"/>
       </geometry>
       <material name="rim.002"/>
     </visual>
@@ -64,7 +68,7 @@
     <visual name="RearLeft">
       <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
-        <mesh filename="package://robot_centric_slam/meshes/dae/Circle.023.dae" scale="0.015 0.015 0.01"/>
+        <mesh filename="../meshes/dae/Circle.023.dae" scale="0.015 0.015 0.01"/>
       </geometry>
       <material name="rubber.001"/>
     </visual>
@@ -85,7 +89,7 @@
     <visual name="RearRight">
       <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
-        <mesh filename="package://robot_centric_slam/meshes/dae/Circle.003.dae" scale="0.015 0.015 0.01"/>
+        <mesh filename="../meshes/dae/Circle.003.dae" scale="0.015 0.015 0.01"/>
       </geometry>
       <material name="rubber.001"/>
     </visual>
@@ -136,42 +140,5 @@
   <material name="rubber.001">
     <color rgba="0 0 0 1.0"/>
   </material>
-
-  <link name="sensor_kit_base_link"></link>
-  <link name="imu_link"></link>
-  <link name="os_sensor"></link>
-  <link name="camera_link"></link>
-  <link name="camera_optical_link"></link>
-
-  <joint name="sensor_kit_base_link_joint" type="fixed">
-    <parent link="base_link" />
-    <child link="sensor_kit_base_link" />
-    <origin xyz="0.0 0 0.2" rpy="0 0 0" />
-  </joint>
-
-  <joint name="imu_joint" type="fixed">
-    <parent link="sensor_kit_base_link" />
-    <child link="imu_link" />
-    <origin xyz="0.0 0.0 0.0" rpy="0 0 0" />
-  </joint>
-
-  <joint name="os_joint" type="fixed">
-    <parent link="sensor_kit_base_link" />
-    <child link="os_sensor" />
-    <origin xyz="0.0 0.0 0.0" rpy="0 0 0" />
-  </joint>
-
-  <joint name="camera_joint" type="fixed">
-    <parent link="sensor_kit_base_link" />
-    <child link="camera_link" />
-    <origin xyz="-0.15 0.0 0.0" rpy="0 0 0" />
-  </joint>
-
-  <joint name="camera_optical_joint" type="fixed">
-    <parent link="camera_link" />
-    <child link="camera_optical_link" />
-    <origin xyz="0.0 0.0 0.0" rpy="-1.57 0 -1.57" />
-  </joint>
-
 
 </robot>

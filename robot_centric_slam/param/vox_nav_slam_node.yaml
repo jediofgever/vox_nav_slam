@@ -4,11 +4,11 @@ vox_nav_slam_node:
     x_bound: 8.0
     y_bound: 8.0
     z_bound: 5.0
-    downsample_voxel_size: 0.05
-    map_voxel_size: 0.05
+    downsample_voxel_size: 0.1
+    map_voxel_size: 0.1
     max_icp_iter: 200
-    max_correspondence_distance: 0.5
-    method : 'VGICP_CUDA' # OTHER OPTIONS' GICP, VGICP, VGICP_CUDA, NDT_CUDA
+    max_correspondence_distance: 2.5
+    method : 'NDT_CUDA' # OTHER OPTIONS' GICP, VGICP, VGICP_CUDA, NDT_CUDA, PCL_NDT
     num_threads: 4
     max_num_targeted_clouds: 20
     min_dist_to_update_map: 0.15
