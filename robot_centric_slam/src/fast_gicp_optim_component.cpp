@@ -110,9 +110,6 @@ void FastGICPOptimComponent::icpThread()
 {
   while (rclcpp::ok())
   {
-    // Make sure to lock the mutex before accessing the map array
-    // std::lock_guard<std::mutex> lock(mutex_);
-
     // Make sure there are at least 2 submaps in the map array
     if (map_array_msg_->submaps.size() <= 2)
     {
@@ -143,7 +140,7 @@ void FastGICPOptimComponent::icpThread()
     }
 
     modified_path_pub_->publish(modified_path);
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    std::this_thread::sleep_for(std::chrono::seconds(1));
   }
 }
 

@@ -14,7 +14,7 @@ def generate_launch_description():
         name="imu_locomotion_node",
         remappings=[
             # ("agv_map", "/map_cloud"),
-            ("agv_map", "/lio_sam/mapping/map_local"),
+            ("agv_map", "/map_cloud"),
             ("agv_imu", "/imu/data/corrected"),
         ],
         output="screen",

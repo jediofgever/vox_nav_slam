@@ -191,6 +191,7 @@ void FastGICPScanMatcher::initializeMap(const pcl::PointCloud<pcl::PointXYZI>::P
   pcl::toROSMsg(*cloud_downsampled, *cloud_msg_ptr);
 
   // push as the first submap
+  // Always keeping the NON transfromed cloud for submap
   vox_nav_slam_msgs::msg::SubMap submap;
   submap.header.frame_id = "odom";
   submap.header.stamp = now();
@@ -405,6 +406,7 @@ void FastGICPScanMatcher::insertScantoMap(const pcl::PointCloud<pcl::PointXYZI>:
   sensor_msgs::msg::PointCloud2::SharedPtr cloud_msg_ptr(new sensor_msgs::msg::PointCloud2);
   pcl::toROSMsg(*cloud, *cloud_msg_ptr);
 
+  // Always keeping the NON transfromed cloud for submap
   vox_nav_slam_msgs::msg::SubMap submap;
   submap.header.frame_id = "odom";
   submap.header.stamp = now();

@@ -31,6 +31,8 @@
 #include <tf2_ros/create_timer_ros.h>
 #include <pcl/filters/model_outlier_removal.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.h>
+#include <vision_msgs/msg/detection3_d.hpp>
+#include <std_msgs/msg/float32_multi_array.hpp>
 
 #include <pcl/PCLPointCloud2.h>
 #include <pcl/common/common.h>
@@ -79,9 +81,15 @@ private:
 
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr marker_array_pub_;
 
+  rclcpp::Publisher<std_msgs::msg::Float32MultiArray>::SharedPtr imu_covariance_pub_;
+
+  // publish a footprint box around the robot
+  rclcpp::Publisher<vision_msgs::msg::Detection3D>::SharedPtr footprint_box_pub_;
+
   pcl::PointCloud<pcl::PointXYZI>::Ptr map_;
 
   std::vector<sensor_msgs::msg::Imu::SharedPtr> imu_buffer_;
+  sensor_msgs::msg::Imu::SharedPtr latest_imu_msg_;
   visualization_msgs::msg::MarkerArray locomotion_error_markers_;
 
   // Lat N seconds to consider
@@ -100,6 +108,8 @@ private:
 
   // service server for taking a snapshot of point cloud
   std::vector<rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr> take_snapshot_srv_;
+
+  std::mutex mutex_;
 };
 
 LocomotionAnalyzer::LocomotionAnalyzer() : Node("locomotion_analyzer")
@@ -125,6 +135,14 @@ LocomotionAnalyzer::LocomotionAnalyzer() : Node("locomotion_analyzer")
   marker_array_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>(  // NOLINT
       "cova_marker_array", rclcpp::QoS(rclcpp::KeepLast(1)).reliable());
 
+  // footprint box publisher
+  footprint_box_pub_ = this->create_publisher<vision_msgs::msg::Detection3D>(  // NOLINT
+      "footprint_box", rclcpp::QoS(rclcpp::KeepLast(1)).reliable());
+
+  // imu covariance publisher
+  imu_covariance_pub_ = this->create_publisher<std_msgs::msg::Float32MultiArray>(  // NOLINT
+      "imu_info", rclcpp::QoS(rclcpp::KeepLast(1)).reliable());
+
   // from 0 to 5, there is 6 services
   for (size_t i = 0; i < 6; i++)
   {
@@ -137,6 +155,7 @@ LocomotionAnalyzer::LocomotionAnalyzer() : Node("locomotion_analyzer")
   // TF listener
   tf_buffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
   tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
+  latest_imu_msg_ = sensor_msgs::msg::Imu::SharedPtr(new sensor_msgs::msg::Imu());
 
   declare_parameter("look_back_poses", 50);
   get_parameter("look_back_poses", look_back_poses_);
@@ -271,6 +290,20 @@ void LocomotionAnalyzer::publishCovarianceMarkers(
   acc_covariance_marker.color.b = 0.0;
   locomotion_error_markers_.markers.push_back(acc_covariance_marker);
 
+  // also publish the footprint box as a detection3d message
+  vision_msgs::msg::Detection3D footprint_box;
+  footprint_box.header.frame_id = "base_link";
+  footprint_box.header.stamp = this->now();
+  footprint_box.results = { vision_msgs::msg::ObjectHypothesisWithPose() };
+  footprint_box.bbox.center.position.x = 0.0;
+  footprint_box.bbox.center.position.y = 0.0;
+  footprint_box.bbox.center.position.z = 0.0;
+  footprint_box.bbox.size.x = 2.0;
+  footprint_box.bbox.size.y = 1.0;
+  footprint_box.bbox.size.z = 5.0;
+  footprint_box.id = "footprint_box";
+  footprint_box_pub_->publish(footprint_box);
+
   // Publish the loco error markers
   marker_array_pub_->publish(locomotion_error_markers_);
 }
@@ -280,7 +313,13 @@ void LocomotionAnalyzer::takeSnapshotCallback(const std::shared_ptr<rmw_request_
                                               const std::shared_ptr<std_srvs::srv::SetBool::Response> response,
                                               const int i)
 {
+  // Lets print i to see which service is called
+  RCLCPP_INFO(this->get_logger(), "take_snapshot_%i service has been called.", i);
+
   double locomotion_error = 1.0 / 5.0 * i;
+
+  // print the locomotion error
+  RCLCPP_INFO(this->get_logger(), "locomotion_error: %f", locomotion_error);
 
   // crop the map to the ROI with crop box filter around current pose
   pcl::CropBox<pcl::PointXYZI> crop_box_filter;
@@ -343,8 +382,8 @@ void LocomotionAnalyzer::takeSnapshotCallback(const std::shared_ptr<rmw_request_
   locomotion_error_str.erase(remove(locomotion_error_str.begin(), locomotion_error_str.end(), '.'),
                              locomotion_error_str.end());  // remove . from string
 
-  std::string map_file_name =
-      "/home/atas/traversablity_estimation_net/data_imu/" + time_string_str + "_" + locomotion_error_str + ".pcd";
+  std::string map_file_name = "/home/atas/RESEARCH/traversablity_estimation_net/data_imu/" + time_string_str + "_" +
+                              locomotion_error_str + ".pcd";
   pcl::io::savePCDFileASCII(map_file_name, *transformed_cloud_ptr);
   RCLCPP_INFO(get_logger(), "Map saved to %s", map_file_name.c_str());
 
@@ -354,9 +393,12 @@ void LocomotionAnalyzer::takeSnapshotCallback(const std::shared_ptr<rmw_request_
   auto imu_covariance = calculateIMUCovariance();
 
   // Flatten the matrices to vectors and concatenate them
-  Eigen::Map<Eigen::VectorXf> v1(std::get<0>(imu_covariance).data(), std::get<0>(imu_covariance).size());  // size = 9
-  Eigen::Map<Eigen::VectorXf> v2(std::get<1>(imu_covariance).data(), std::get<1>(imu_covariance).size());  // size = 9
-  Eigen::Map<Eigen::VectorXf> v3(std::get<2>(imu_covariance).data(), std::get<2>(imu_covariance).size());  // size = 9
+  Eigen::Map<Eigen::VectorXf> v1(std::get<0>(imu_covariance).data(),
+                                 std::get<0>(imu_covariance).size());  // size = 9 // RPY
+  Eigen::Map<Eigen::VectorXf> v2(std::get<1>(imu_covariance).data(),
+                                 std::get<1>(imu_covariance).size());  // size = 9 // ACC
+  Eigen::Map<Eigen::VectorXf> v3(std::get<2>(imu_covariance).data(),
+                                 std::get<2>(imu_covariance).size());  // size = 9 // GYRO
 
   // Concatenate the vectors to get a single vector of size 36
   Eigen::VectorXf imu_covariance_vector(36);
@@ -372,14 +414,36 @@ void LocomotionAnalyzer::takeSnapshotCallback(const std::shared_ptr<rmw_request_
   // Print the vector
   // log the format of the vector
   // rpy_covariance, acc_covariance, gyro_covariance, rpy_mean, acc_mean, gyro_mean
-  std::cout << "The vector includes the following elements: " << std::endl;
-  std::cout << "rpy_covariance: "
-            << "acc_covariance: "
-            << "gyro_covariance: "
-            << "rpy_mean: "
-            << "acc_mean: "
-            << "gyro_mean: " << std::endl;
-  std::cout << "imu_covariance_vector: " << imu_covariance_vector_str << std::endl;
+  // std::cout << "The vector includes the following elements: " << std::endl;
+  // std::cout << "rpy_covariance: "
+  //           << "acc_covariance: "
+  //           << "gyro_covariance: "
+  //           << "rpy_mean: "
+  //           << "acc_mean: "
+  //           << "gyro_mean: " << std::endl;
+  // std::cout << "imu_covariance_vector: " << imu_covariance_vector_str << std::endl;
+
+  // Lets create another vector with acc_covariance, and xyzw of the orientation quaternion
+  // with 9 + 4 = 13 elements
+  Eigen::VectorXf imu_covariance_vector_13(13);
+  Eigen::Vector4f orientation_quaternion(latest_imu_msg_->orientation.x, latest_imu_msg_->orientation.y,
+                                         latest_imu_msg_->orientation.z, latest_imu_msg_->orientation.w);
+  imu_covariance_vector_13 << v2, orientation_quaternion;
+
+  // print the imu_covariance_vector_13
+  std::cout << "imu_covariance_vector_13: " << imu_covariance_vector_13 << std::endl;
+
+  // make a string from imu_covariance_vector_13
+  std::stringstream ss3;
+  ss3 << std::fixed << std::setprecision(5) << imu_covariance_vector_13;
+  std::string imu_covariance_vector_13_str = ss3.str();
+
+  // write this with same name but with .txt extension
+  std::string imu_covariance_vector_file_name = map_file_name.substr(0, map_file_name.size() - 4) + ".txt";
+  std::ofstream myfile;
+  myfile.open(imu_covariance_vector_file_name);
+  myfile << imu_covariance_vector_13_str;
+  myfile.close();
 
   // Publish the covariance markers to map -> base_link frame
   publishCovarianceMarkers(imu_covariance, transformStamped.transform);
@@ -387,7 +451,8 @@ void LocomotionAnalyzer::takeSnapshotCallback(const std::shared_ptr<rmw_request_
 
 void LocomotionAnalyzer::imuCallback(const sensor_msgs::msg::Imu::SharedPtr msg)
 {
-  // RCLCPP_INFO(this->get_logger(), "Received odometry message with timestamp %i.", msg->header.stamp.sec);
+  std::lock_guard<std::mutex> lock(mutex_);
+  latest_imu_msg_ = std::make_shared<sensor_msgs::msg::Imu>(*msg);
 
   // get transform from odom to base_link
   geometry_msgs::msg::TransformStamped transform_stamped;
@@ -439,6 +504,26 @@ void LocomotionAnalyzer::imuCallback(const sensor_msgs::msg::Imu::SharedPtr msg)
   // get IMU covariance and publish it
   auto imu_covariance = calculateIMUCovariance();
   publishCovarianceMarkers(imu_covariance, transform_stamped_map.transform);
+
+  // In case we are inferrring the we need to also publish the floatarray message for IMU
+  // covariance and orientation quaternion
+
+  Eigen::VectorXf imu_covariance_vector_13(13);
+  Eigen::Map<Eigen::VectorXf> v2(std::get<1>(imu_covariance).data(),
+                                 std::get<1>(imu_covariance).size());  // size = 9 // ACC
+  Eigen::Vector4f orientation_quaternion(latest_imu_msg_->orientation.x, latest_imu_msg_->orientation.y,
+                                         latest_imu_msg_->orientation.z, latest_imu_msg_->orientation.w);
+  imu_covariance_vector_13 << v2, orientation_quaternion;
+
+  // crete float vector from imu_covariance_vector_13
+  std::vector<float> imu_covariance_vector_13_float_vector(
+      imu_covariance_vector_13.data(), imu_covariance_vector_13.data() + imu_covariance_vector_13.size());
+
+  // Now publish the imu_covariance_vector_13 as a float32multiarray
+  std_msgs::msg::Float32MultiArray imu_covariance_vector_13_msg;
+  imu_covariance_vector_13_msg.data = imu_covariance_vector_13_float_vector;
+
+  imu_covariance_pub_->publish(imu_covariance_vector_13_msg);
 }
 
 void LocomotionAnalyzer::mapCallback(const sensor_msgs::msg::PointCloud2::SharedPtr msg)

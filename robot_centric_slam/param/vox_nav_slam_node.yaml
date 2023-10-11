@@ -10,7 +10,7 @@ vox_nav_slam_node:
     max_correspondence_distance: 2.5
     method : 'NDT_CUDA' # OTHER OPTIONS' GICP, VGICP, VGICP_CUDA, NDT_CUDA, PCL_NDT
     num_threads: 4
-    max_num_targeted_clouds: 20
-    min_dist_to_update_map: 0.15
+    max_num_targeted_clouds: 25
+    min_dist_to_update_map: 0.20
     publish_tf: True
-    debug: True
+    debug: False

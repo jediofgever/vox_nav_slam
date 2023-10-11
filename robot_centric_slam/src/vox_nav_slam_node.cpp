@@ -13,8 +13,8 @@ int main(int argc, char* argv[])
 
   auto scanmatcher = std::make_shared<vox_nav_slam::FastGICPScanMatcher>(options);
   exec.add_node(scanmatcher);
-  // auto optim = std::make_shared<vox_nav_slam::FastGICPOptimComponent>(options);
-  // exec.add_node(optim);
+  auto optim = std::make_shared<vox_nav_slam::FastGICPOptimComponent>(options);
+  exec.add_node(optim);
   //  auto gtsam = std::make_shared<vox_nav_slam::GTSAMComponent>(options);
   //  exec.add_node(gtsam);
 
